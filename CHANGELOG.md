@@ -1,3 +1,21 @@
+# v0.5.0 (Tue Aug 25 2026)
+
+#### 🚀 Enhancement
+
+- feat: release runtime recovery and installer fixes ([@yurseria](https://github.com/yurseria))
+- feat: restore Apple Compose services and fix release installs ([@yurseria](https://github.com/yurseria))
+- feat: expand Apple Container runtime support ([@yurseria](https://github.com/yurseria))
+
+#### 🐛 Bug Fix
+
+- chore: merge main into release ([@yurseria](https://github.com/yurseria))
+
+#### Authors: 1
+
+- minsu ([@yurseria](https://github.com/yurseria))
+
+---
+
 # v0.4.1 (Fri Aug 21 2026)
 
 #### 🐛 Bug Fix
