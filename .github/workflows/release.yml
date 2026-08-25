@@ -28,7 +28,7 @@ jobs:
 
       - name: Install auto
         run: |
-          npm i -D auto @auto-it/git-tag @auto-it/exec @auto-it/conventional-commits
+          npm i -D auto@11.3.6 @auto-it/git-tag@11.3.6 @auto-it/exec@11.3.6 @auto-it/conventional-commits@11.3.6
           git checkout -- package.json package-lock.json
 
       - name: Create labels
@@ -69,7 +69,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: release
+          # Build the exact commit that Auto tagged, not a possibly newer
+          # release branch head.
+          ref: ${{ needs.release.outputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -84,8 +86,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Sync version from release tag
-        run: node scripts/sync-version.mjs
+      - name: Verify version from release tag
+        run: node scripts/sync-version.mjs --check
         env:
           ARG_0: ${{ needs.release.outputs.tag }}
 
@@ -97,6 +99,18 @@ jobs:
 
       - name: Package Tauri
         run: npx tauri build
+
+      - name: Verify packaged app version
+        run: |
+          EXPECTED="${TAG#v}"
+          APP="src-tauri/target/release/bundle/macos/Docker Tray.app"
+          ACTUAL=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
+          test "$ACTUAL" = "$EXPECTED" || {
+            echo "Packaged app version $ACTUAL does not match release $EXPECTED" >&2
+            exit 1
+          }
+        env:
+          TAG: ${{ needs.release.outputs.tag }}
 
       - name: Collect artifacts
         run: |

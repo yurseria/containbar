@@ -64,6 +64,196 @@ fn setup_macos_window(window: &tauri::WebviewWindow) {
     }
 }
 
+#[derive(Clone, Copy)]
+struct LogicalRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+fn clamped_tray_window_position(
+    icon: LogicalRect,
+    window_size: (f64, f64),
+    work_area: LogicalRect,
+) -> (f64, f64) {
+    let (window_width, window_height) = window_size;
+    let max_x = (work_area.x + work_area.width - window_width).max(work_area.x);
+    let max_y = (work_area.y + work_area.height - window_height).max(work_area.y);
+    let x = (icon.x + icon.width / 2.0 - window_width / 2.0).clamp(work_area.x, max_x);
+    let y = (icon.y + icon.height).clamp(work_area.y, max_y);
+    (x, y)
+}
+
+#[cfg(test)]
+mod tray_position_tests {
+    use super::{clamped_tray_window_position, LogicalRect};
+
+    #[test]
+    fn centers_below_the_tray_icon() {
+        assert_eq!(
+            clamped_tray_window_position(
+                LogicalRect {
+                    x: 1000.0,
+                    y: 0.0,
+                    width: 24.0,
+                    height: 24.0,
+                },
+                (420.0, 560.0),
+                LogicalRect {
+                    x: 0.0,
+                    y: 24.0,
+                    width: 1440.0,
+                    height: 876.0,
+                },
+            ),
+            (802.0, 24.0)
+        );
+    }
+
+    #[test]
+    fn keeps_the_window_inside_the_clicked_monitor() {
+        assert_eq!(
+            clamped_tray_window_position(
+                LogicalRect {
+                    x: 1430.0,
+                    y: 850.0,
+                    width: 20.0,
+                    height: 24.0,
+                },
+                (420.0, 560.0),
+                LogicalRect {
+                    x: 0.0,
+                    y: 24.0,
+                    width: 1440.0,
+                    height: 876.0,
+                },
+            ),
+            (1020.0, 340.0)
+        );
+        assert_eq!(
+            clamped_tray_window_position(
+                LogicalRect {
+                    x: -100.0,
+                    y: 0.0,
+                    width: 20.0,
+                    height: 24.0,
+                },
+                (420.0, 560.0),
+                LogicalRect {
+                    x: -1920.0,
+                    y: 24.0,
+                    width: 1920.0,
+                    height: 1056.0,
+                },
+            ),
+            (-420.0, 24.0)
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn position_window_at_tray_icon(
+    window: &tauri::WebviewWindow,
+    icon_position: tauri::Position,
+    icon_size: tauri::Size,
+) {
+    // tray-icon reports a physical rect using the clicked screen's scale, but
+    // the hidden window still reports the scale of the screen it last occupied.
+    // Convert the icon and window to one global logical coordinate space before
+    // positioning; mixing those scales sends the popup to another display.
+    let Ok(monitors) = window.available_monitors() else {
+        return;
+    };
+    let Ok(Some(primary)) = window.primary_monitor() else {
+        return;
+    };
+    let mouse = objc2_app_kit::NSEvent::mouseLocation();
+    let primary_height = primary.size().height as f64 / primary.scale_factor();
+    let mouse_x = mouse.x;
+    let mouse_y = primary_height - mouse.y;
+
+    let monitor = monitors
+        .iter()
+        .find(|monitor| {
+            let scale = monitor.scale_factor();
+            let x = monitor.position().x as f64 / scale;
+            let y = monitor.position().y as f64 / scale;
+            let width = monitor.size().width as f64 / scale;
+            let height = monitor.size().height as f64 / scale;
+            mouse_x >= x && mouse_x < x + width && mouse_y >= y && mouse_y < y + height
+        })
+        .unwrap_or(&primary);
+
+    let target_scale = monitor.scale_factor();
+    let monitor_x = monitor.position().x as f64 / target_scale;
+    let monitor_y = monitor.position().y as f64 / target_scale;
+    let physical_origin_x = monitor_x * target_scale;
+    let physical_origin_y = monitor_y * target_scale;
+    let icon_x = match icon_position {
+        tauri::Position::Physical(position) => {
+            monitor_x + (position.x as f64 - physical_origin_x) / target_scale
+        }
+        tauri::Position::Logical(position) => position.x,
+    };
+    let icon_y = match icon_position {
+        tauri::Position::Physical(position) => {
+            monitor_y + (position.y as f64 - physical_origin_y) / target_scale
+        }
+        tauri::Position::Logical(position) => position.y,
+    };
+    let (icon_width, icon_height) = match icon_size {
+        tauri::Size::Physical(size) => (
+            size.width as f64 / target_scale,
+            size.height as f64 / target_scale,
+        ),
+        tauri::Size::Logical(size) => (size.width, size.height),
+    };
+    let window_scale = window.scale_factor().unwrap_or(1.0);
+    let window_size = window
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize::new(420, 560));
+    let window_width = window_size.width as f64 / window_scale;
+    let window_height = window_size.height as f64 / window_scale;
+    let work_area = monitor.work_area();
+    let work_x = work_area.position.x as f64 / target_scale;
+    let work_y = work_area.position.y as f64 / target_scale;
+    let work_width = work_area.size.width as f64 / target_scale;
+    let work_height = work_area.size.height as f64 / target_scale;
+    let (x, y) = clamped_tray_window_position(
+        LogicalRect {
+            x: icon_x,
+            y: icon_y,
+            width: icon_width,
+            height: icon_height,
+        },
+        (window_width, window_height),
+        LogicalRect {
+            x: work_x,
+            y: work_y,
+            width: work_width,
+            height: work_height,
+        },
+    );
+    let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+}
+
+#[cfg(not(target_os = "macos"))]
+fn position_window_at_tray_icon(
+    window: &tauri::WebviewWindow,
+    icon_position: tauri::Position,
+    icon_size: tauri::Size,
+) {
+    let position = icon_position.to_physical(window.scale_factor().unwrap_or(1.0));
+    let size = icon_size.to_physical(window.scale_factor().unwrap_or(1.0));
+    let window_size = window
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize::new(420, 560));
+    let x = position.x + (size.width as i32 - window_size.width as i32) / 2;
+    let y = position.y + size.height as i32;
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
 #[cfg(target_os = "macos")]
 fn set_macos_accessory_app() {
     use objc2::MainThreadMarker;
@@ -209,7 +399,7 @@ pub fn run() {
                 })
                 .on_tray_icon_event(move |tray, event| {
                     if let TrayIconEvent::Click {
-                        position,
+                        rect,
                         button_state: MouseButtonState::Up,
                         ..
                     } = event
@@ -238,18 +428,7 @@ pub fn run() {
                         }
 
                         {
-                            let scale = window.scale_factor().unwrap_or(1.0);
-                            let window_size = window
-                                .outer_size()
-                                .unwrap_or(tauri::PhysicalSize::new(420, 560));
-                            let w = window_size.width as f64 / scale;
-                            let h = window_size.height as f64 / scale;
-
-                            let x = position.x - (w / 2.0);
-                            let y = position.y - h;
-
-                            let _ = window
-                                .set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+                            position_window_at_tray_icon(&window, rect.position, rect.size);
                             #[cfg(target_os = "macos")]
                             {
                                 use objc2::MainThreadMarker;
@@ -285,9 +464,8 @@ pub fn run() {
             let provider = app.state::<ProviderState>().get();
             let status =
                 runtime::detect_runtime(&app.path().resource_dir().unwrap_or_default(), provider);
-            let needs_start = provider::setup_complete(app.handle())
-                && provider != ProviderKind::Docker
-                && !status.running;
+            let setup_complete = provider::setup_complete(app.handle());
+            let needs_start = setup_complete && provider != ProviderKind::Docker && !status.running;
 
             if needs_start {
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
@@ -302,7 +480,7 @@ pub fn run() {
                         let _ = tray.set_tooltip(Some("Docker Tray — Starting runtime..."));
                     }
                     std::thread::spawn(move || {
-                        let success = match prepare_provider(&resource_dir, provider) {
+                        let success = match prepare_provider(&app_handle, &resource_dir, provider) {
                             Ok(client) => {
                                 if let Ok(mut guard) = docker_client.lock() {
                                     *guard = client;
@@ -335,6 +513,29 @@ pub fn run() {
                         }
                     });
                 }
+            } else if setup_complete && provider == ProviderKind::Apple && status.running {
+                // The Apple backend may survive an app restart, but it has no
+                // daemon-level restart policy. Reconcile persisted Compose
+                // intent without pretending that the runtime itself is down.
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    match docker::restore_apple_compose_projects(&app_handle) {
+                        Ok(restored) if restored > 0 => send_notification(
+                            &app_handle,
+                            "Apple Compose restored",
+                            &format!("Restarted {restored} service(s)"),
+                        ),
+                        Ok(_) => {}
+                        Err(error) => {
+                            eprintln!("{error}");
+                            send_notification(
+                                &app_handle,
+                                "Apple Compose restore incomplete",
+                                &error,
+                            );
+                        }
+                    }
+                });
             }
 
             Ok(())
@@ -517,6 +718,7 @@ fn build_runtime_overview(app: &tauri::AppHandle, selected: ProviderKind) -> Run
 }
 
 fn prepare_provider(
+    app: &tauri::AppHandle,
     resource_dir: &std::path::Path,
     provider: ProviderKind,
 ) -> Result<Option<bollard::Docker>, String> {
@@ -538,6 +740,10 @@ fn prepare_provider(
             runtime::ensure_apple_container()?;
             apple::system_start()?;
             apple::list_containers()?;
+            if let Err(error) = docker::restore_apple_compose_projects(app) {
+                eprintln!("{error}");
+                send_notification(app, "Apple Compose restore incomplete", &error);
+            }
             Ok(None)
         }
     }
@@ -571,8 +777,9 @@ async fn switch_provider(
         *guard = None;
     }
     let resource_for_task = resource_dir.clone();
+    let app_for_task = app.clone();
     let joined = tauri::async_runtime::spawn_blocking(move || {
-        prepare_provider(&resource_for_task, provider)
+        prepare_provider(&app_for_task, &resource_for_task, provider)
     })
     .await;
 
@@ -682,7 +889,7 @@ fn runtime_start(
 
     // Run in background thread — returns immediately
     std::thread::spawn(move || {
-        let success = match prepare_provider(&resource_dir, provider) {
+        let success = match prepare_provider(&app_handle, &resource_dir, provider) {
             Ok(client) => {
                 if let Ok(mut guard) = docker_client.lock() {
                     *guard = client;

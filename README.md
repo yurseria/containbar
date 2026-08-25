@@ -37,6 +37,7 @@
 - **컨테이너 관리**: 시작, 중지, 재시작, 삭제
 - **그룹 제어**: Compose 그룹 단위 시작/중지/삭제
 - **Compose 지원**: `docker-compose.yaml` 파일 불러와서 실행 (Docker/Colima는 Docker Compose, Apple Container는 Mocker 사용). Apple 전환 시 포트를 점유한 기존 Compose 프로젝트를 식별하고, 사용자 확인 후 안전하게 중지하고 계속할 수 있습니다.
+- **Apple Compose 자동 복원**: Apple Container에서 `restart: always` 및 `unless-stopped` 정책을 앱이 보존하여 런타임이나 앱 재시작 후 서비스와 네트워크 호스트 매핑을 복원
 - **이미지 관리**: Pull, 이미지에서 컨테이너 생성, 삭제
 - **볼륨 & 네트워크**: 조회 및 삭제
 - **검색/필터**: 모든 탭에서 이름, 이미지, 드라이버로 검색
