@@ -75,6 +75,27 @@ find_asset() {
 
 # ── Download & install ──
 
+stop_running_app() {
+  local pids
+  pids="$(pgrep -x docker-tray 2>/dev/null || true)"
+  if [ -z "$pids" ]; then
+    return
+  fi
+
+  info "Stopping the currently running $APP_NAME..."
+  # A previously launched development bundle has the same bundle identifier,
+  # so `open -a` would otherwise reactivate that stale process after install.
+  kill -TERM $pids 2>/dev/null || true
+  local attempt
+  for attempt in $(seq 1 50); do
+    if ! pgrep -x docker-tray >/dev/null 2>&1; then
+      return
+    fi
+    sleep 0.1
+  done
+  error "Could not stop the existing $APP_NAME. Quit it manually and run the installer again."
+}
+
 install_macos() {
   TMPDIR_CLEANUP="$(mktemp -d)"
   local tmpdir="$TMPDIR_CLEANUP"
@@ -94,6 +115,8 @@ install_macos() {
     error "Could not find .app in disk image."
   fi
 
+  stop_running_app
+
   info "Installing to /Applications..."
   rm -rf "/Applications/$(basename "$app")"
   cp -R "$app" /Applications/
@@ -103,7 +126,16 @@ install_macos() {
   # Gatekeeper quarantine 속성 제거
   xattr -rd com.apple.quarantine "/Applications/$(basename "$app")" 2>/dev/null || true
 
-  info "$APP_NAME has been installed to /Applications."
+  local installed_app="/Applications/$(basename "$app")"
+  local installed_version
+  installed_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$installed_app/Contents/Info.plist" 2>/dev/null || true)"
+  if [ "$installed_version" != "${VERSION#v}" ]; then
+    error "Installed version $installed_version does not match $VERSION."
+  fi
+
+  info "$APP_NAME $VERSION has been installed to /Applications."
+  info "Opening the newly installed app..."
+  open "$installed_app"
 }
 
 # ── Main ──
@@ -120,9 +152,7 @@ main() {
   echo
   info "Done! Enjoy $APP_NAME."
 
-  echo
-  echo "Open from Applications or run:"
-  echo "open -a '${APP_NAME}'"
+  echo "The installed app has been opened from /Applications."
 }
 
 main

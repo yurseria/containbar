@@ -37,6 +37,7 @@
 - **Container Lifecycle**: Start, stop, restart, remove
 - **Group Control**: Start/stop/remove entire Compose groups
 - **Compose Support**: Import and run `docker-compose.yaml` files (Docker Compose on Docker/Colima, Mocker on Apple Container). When switching to Apple, Docker Tray identifies an existing Compose project that owns conflicting ports and can stop it after explicit confirmation.
+- **Apple Compose Restore**: Preserves `restart: always` and `unless-stopped` intent on Apple Container, restoring eligible services and network host mappings after the runtime or app restarts
 - **Image Management**: Pull, create containers from, and remove images
 - **Volume & Network**: Browse and remove
 - **Search/Filter**: Filter across all tabs by name, image, or driver

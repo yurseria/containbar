@@ -9,7 +9,7 @@ use bollard::volume::ListVolumesOptions;
 use bollard::Docker;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::io::{BufReader, Read};
@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 pub struct DockerState {
     pub client: std::sync::Arc<std::sync::Mutex<Option<Docker>>>,
@@ -287,10 +287,12 @@ pub async fn list_networks(
 pub async fn start_container(
     provider: State<'_, crate::provider::ProviderState>,
     docker: State<'_, DockerState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<(), String> {
     if provider.get() == crate::provider::ProviderKind::Apple {
-        return crate::apple::start_container(&id);
+        crate::apple::start_container(&id)?;
+        return set_apple_compose_manual_state(&app, &[id], false);
     }
     get_client(&docker)?
         .start_container(&id, None::<StartContainerOptions<String>>)
@@ -302,10 +304,12 @@ pub async fn start_container(
 pub async fn stop_container(
     provider: State<'_, crate::provider::ProviderState>,
     docker: State<'_, DockerState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<(), String> {
     if provider.get() == crate::provider::ProviderKind::Apple {
-        return crate::apple::stop_container(&id);
+        crate::apple::stop_container(&id)?;
+        return set_apple_compose_manual_state(&app, &[id], true);
     }
     get_client(&docker)?
         .stop_container(&id, Some(StopContainerOptions { t: 10 }))
@@ -317,10 +321,12 @@ pub async fn stop_container(
 pub async fn restart_container(
     provider: State<'_, crate::provider::ProviderState>,
     docker: State<'_, DockerState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<(), String> {
     if provider.get() == crate::provider::ProviderKind::Apple {
-        return crate::apple::restart_container(&id);
+        crate::apple::restart_container(&id)?;
+        return set_apple_compose_manual_state(&app, &[id], false);
     }
     get_client(&docker)?
         .restart_container(
@@ -335,13 +341,15 @@ pub async fn restart_container(
 pub async fn start_container_group(
     provider: State<'_, crate::provider::ProviderState>,
     docker: State<'_, DockerState>,
+    app: tauri::AppHandle,
     ids: Vec<String>,
 ) -> Result<(), String> {
     if ids.is_empty() {
         return Ok(());
     }
     if provider.get() == crate::provider::ProviderKind::Apple {
-        return start_apple_compose_group(&ids);
+        start_apple_compose_group(&ids)?;
+        return set_apple_compose_manual_state(&app, &ids, false);
     }
 
     let client = get_client(&docker)?;
@@ -368,24 +376,25 @@ pub async fn start_container_group(
 pub async fn stop_container_group(
     provider: State<'_, crate::provider::ProviderState>,
     docker: State<'_, DockerState>,
+    app: tauri::AppHandle,
     ids: Vec<String>,
 ) -> Result<(), String> {
     if ids.is_empty() {
         return Ok(());
     }
     if provider.get() == crate::provider::ProviderKind::Apple {
-        for id in ids.into_iter().rev() {
+        for id in ids.iter().rev() {
             // A group can contain already-stopped one-shot services. Ignore
             // only those; a real CLI failure still aborts the operation.
-            if let Ok(container) = inspect_apple_compose_container(&id) {
+            if let Ok(container) = inspect_apple_compose_container(id) {
                 if !container.running {
                     continue;
                 }
             }
-            crate::apple::stop_container(&id)
+            crate::apple::stop_container(id)
                 .map_err(|error| format!("Could not stop container {id}: {error}"))?;
         }
-        return Ok(());
+        return set_apple_compose_manual_state(&app, &ids, true);
     }
 
     let client = get_client(&docker)?;
@@ -1104,7 +1113,7 @@ pub async fn stop_conflicting_compose_projects(
 
 fn mocker_project_exists(mocker: &Path, file_path: &str) -> bool {
     Command::new(mocker)
-        .args(["compose", "-f", file_path, "ps", "-q"])
+        .args(["compose", "-f", file_path, "ps", "--all", "-q"])
         .stdin(Stdio::null())
         .output()
         .is_ok_and(|output| output.status.success() && !output.stdout.trim_ascii().is_empty())
@@ -1116,16 +1125,56 @@ const COMPOSE_HOSTS_END: &str = "# docker-tray compose hosts end";
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MockerComposeContainer {
     id: String,
+    project: String,
     service: String,
     network: String,
     ip: String,
     running: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum ComposeRestartPolicy {
+    #[default]
+    No,
+    Always,
+    UnlessStopped,
+    OnFailure,
+}
+
+impl ComposeRestartPolicy {
+    fn restarts_after_exit(self) -> bool {
+        self != Self::No
+    }
+
+    fn restores_after_runtime_start(self, manually_stopped: bool) -> bool {
+        match self {
+            Self::Always => true,
+            Self::UnlessStopped => !manually_stopped,
+            Self::No | Self::OnFailure => false,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct ComposeServicePolicy {
     dependencies: Vec<String>,
-    restartable: bool,
+    restart: ComposeRestartPolicy,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct AppleComposeRestoreState {
+    #[serde(default)]
+    projects: BTreeMap<String, AppleComposeProjectState>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct AppleComposeProjectState {
+    file_path: String,
+    service_order: Vec<String>,
+    policies: BTreeMap<String, ComposeRestartPolicy>,
+    #[serde(default)]
+    manually_stopped: BTreeSet<String>,
 }
 
 fn command_details(output: &std::process::Output) -> String {
@@ -1175,6 +1224,7 @@ fn apple_compose_container_from_inspect(
             .to_string()
     };
     let inspected_id = string_at("/id");
+    let project = string_at("/configuration/labels/com.mocker.compose.project");
     let service = string_at("/configuration/labels/com.mocker.compose.service");
     let configured_network = string_at("/configuration/labels/com.mocker.compose.network");
     let attachments = item.pointer("/status/networks").and_then(Value::as_array);
@@ -1211,6 +1261,7 @@ fn apple_compose_container_from_inspect(
         } else {
             inspected_id
         },
+        project,
         service,
         network,
         ip,
@@ -1226,7 +1277,7 @@ fn mocker_compose_containers(
     file_path: &str,
 ) -> Result<Vec<MockerComposeContainer>, String> {
     let output = Command::new(mocker)
-        .args(["compose", "-f", file_path, "ps", "-q"])
+        .args(["compose", "-f", file_path, "ps", "--all", "-q"])
         .stdin(Stdio::null())
         .output()
         .map_err(|error| format!("Could not list Apple Compose containers: {error}"))?;
@@ -1255,17 +1306,23 @@ fn mocker_compose_containers(
         .collect()
 }
 
-fn restart_policy_enabled(value: Option<&serde_yaml::Value>) -> bool {
+fn compose_restart_policy(value: Option<&serde_yaml::Value>) -> ComposeRestartPolicy {
     match value {
-        Some(serde_yaml::Value::String(policy)) => {
-            matches!(
-                policy.to_ascii_lowercase().as_str(),
-                "always" | "unless-stopped" | "on-failure"
-            ) || policy.to_ascii_lowercase().starts_with("on-failure:")
-        }
-        Some(serde_yaml::Value::Bool(enabled)) => *enabled,
-        _ => false,
+        Some(serde_yaml::Value::String(policy)) => match policy.to_ascii_lowercase().as_str() {
+            "always" => ComposeRestartPolicy::Always,
+            "unless-stopped" => ComposeRestartPolicy::UnlessStopped,
+            "on-failure" => ComposeRestartPolicy::OnFailure,
+            policy if policy.starts_with("on-failure:") => ComposeRestartPolicy::OnFailure,
+            _ => ComposeRestartPolicy::No,
+        },
+        Some(serde_yaml::Value::Bool(true)) => ComposeRestartPolicy::Always,
+        _ => ComposeRestartPolicy::No,
     }
+}
+
+#[cfg(test)]
+fn restart_policy_enabled(value: Option<&serde_yaml::Value>) -> bool {
+    compose_restart_policy(value).restarts_after_exit()
 }
 
 fn compose_service_policies(
@@ -1308,7 +1365,7 @@ fn compose_service_policies(
             name.to_string(),
             ComposeServicePolicy {
                 dependencies,
-                restartable: restart_policy_enabled(yaml_mapping_value(service, "restart")),
+                restart: compose_restart_policy(yaml_mapping_value(service, "restart")),
             },
         );
     }
@@ -1344,6 +1401,243 @@ fn compose_service_policies(
     }
 
     Ok((ordered, policies))
+}
+
+fn apple_compose_restore_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|directory| directory.join("apple-compose-restore.json"))
+        .map_err(|error| format!("Could not resolve app configuration directory: {error}"))
+}
+
+fn read_apple_compose_restore_state(
+    app: &tauri::AppHandle,
+) -> Result<AppleComposeRestoreState, String> {
+    let path = apple_compose_restore_path(app)?;
+    match fs::read_to_string(&path) {
+        Ok(source) => serde_json::from_str(&source)
+            .map_err(|error| format!("Invalid Apple Compose restore state: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(AppleComposeRestoreState::default())
+        }
+        Err(error) => Err(format!(
+            "Could not read Apple Compose restore state: {error}"
+        )),
+    }
+}
+
+fn write_apple_compose_restore_state(
+    app: &tauri::AppHandle,
+    state: &AppleComposeRestoreState,
+) -> Result<(), String> {
+    let path = apple_compose_restore_path(app)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Invalid Apple Compose restore path".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Could not create app configuration directory: {error}"))?;
+    let body = serde_json::to_vec_pretty(state)
+        .map_err(|error| format!("Could not encode Apple Compose restore state: {error}"))?;
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, body)
+        .map_err(|error| format!("Could not write Apple Compose restore state: {error}"))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("Could not save Apple Compose restore state: {error}"))
+}
+
+fn register_apple_compose_project(
+    app: &tauri::AppHandle,
+    mocker: &Path,
+    file_path: &str,
+) -> Result<(), String> {
+    let (service_order, policies) = compose_service_policies(file_path)?;
+    let containers = mocker_compose_containers(mocker, file_path)?;
+    let project = containers
+        .iter()
+        .find_map(|container| (!container.project.is_empty()).then_some(container.project.clone()))
+        .ok_or_else(|| "Mocker Compose containers have no project label".to_string())?;
+    let policies = policies
+        .into_iter()
+        .map(|(service, policy)| (service, policy.restart))
+        .collect::<BTreeMap<_, _>>();
+    let canonical_path = fs::canonicalize(file_path)
+        .unwrap_or_else(|_| PathBuf::from(file_path))
+        .to_string_lossy()
+        .to_string();
+
+    let mut state = read_apple_compose_restore_state(app)?;
+    state.projects.insert(
+        project,
+        AppleComposeProjectState {
+            file_path: canonical_path,
+            service_order,
+            policies,
+            // An explicit Compose Up means every declared service is eligible
+            // for its configured restart policy again.
+            manually_stopped: BTreeSet::new(),
+        },
+    );
+    write_apple_compose_restore_state(app, &state)
+}
+
+fn set_apple_compose_manual_state(
+    app: &tauri::AppHandle,
+    ids: &[String],
+    stopped: bool,
+) -> Result<(), String> {
+    let identities = ids
+        .iter()
+        .filter_map(|id| inspect_apple_compose_container(id).ok())
+        .filter(|container| !container.project.is_empty() && !container.service.is_empty())
+        .map(|container| (container.project, container.service))
+        .collect::<Vec<_>>();
+    if identities.is_empty() {
+        return Ok(());
+    }
+
+    let mut state = read_apple_compose_restore_state(app)?;
+    let mut changed = false;
+    for (project, service) in identities {
+        let Some(project) = state.projects.get_mut(&project) else {
+            continue;
+        };
+        changed |= if stopped {
+            project.manually_stopped.insert(service)
+        } else {
+            project.manually_stopped.remove(&service)
+        };
+    }
+    if changed {
+        write_apple_compose_restore_state(app, &state)?;
+    }
+    Ok(())
+}
+
+fn services_to_restore(
+    project: &AppleComposeProjectState,
+    containers: &[MockerComposeContainer],
+) -> Vec<String> {
+    let running = containers
+        .iter()
+        .filter(|container| container.running)
+        .map(|container| container.service.as_str())
+        .collect::<HashSet<_>>();
+    project
+        .service_order
+        .iter()
+        .filter(|service| !running.contains(service.as_str()))
+        .filter(|service| {
+            project
+                .policies
+                .get(*service)
+                .copied()
+                .unwrap_or_default()
+                .restores_after_runtime_start(project.manually_stopped.contains(*service))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Restore Compose services after the Apple Container backend (or the host)
+/// starts. Apple has no daemon-level restart policies, so Docker Tray persists
+/// the Compose intent and replays only `always` / eligible `unless-stopped`.
+pub fn restore_apple_compose_projects(app: &tauri::AppHandle) -> Result<usize, String> {
+    let mut state = read_apple_compose_restore_state(app)?;
+    if state.projects.is_empty() {
+        return Ok(0);
+    }
+    let mocker = crate::runtime::mocker_cli()
+        .ok_or_else(|| "Mocker is required to restore Apple Compose projects".to_string())?;
+    let mut restored = 0;
+    let mut failures = Vec::new();
+    let project_names = state.projects.keys().cloned().collect::<Vec<_>>();
+
+    for project_name in project_names {
+        let Some(project) = state.projects.get(&project_name).cloned() else {
+            continue;
+        };
+        if !Path::new(&project.file_path).is_file() {
+            failures.push(format!(
+                "{project_name}: Compose file not found ({})",
+                project.file_path
+            ));
+            continue;
+        }
+        let mut containers = match mocker_compose_containers(&mocker, &project.file_path) {
+            Ok(containers) => containers,
+            Err(error) => {
+                failures.push(format!("{project_name}: {error}"));
+                continue;
+            }
+        };
+        // A running service is explicit evidence that it was started again,
+        // including when the user did so outside Docker Tray. Clear any stale
+        // manual-stop marker before the next backend restart.
+        if let Some(saved_project) = state.projects.get_mut(&project_name) {
+            for container in containers.iter().filter(|container| container.running) {
+                saved_project.manually_stopped.remove(&container.service);
+            }
+        }
+        let targets = services_to_restore(&project, &containers);
+        if targets.is_empty() {
+            continue;
+        }
+        let order = project
+            .service_order
+            .iter()
+            .enumerate()
+            .map(|(index, service)| (service.as_str(), index))
+            .collect::<HashMap<_, _>>();
+        containers.sort_by_key(|container| {
+            order
+                .get(container.service.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+
+        let mut project_failed = false;
+        for service in &targets {
+            let Some(index) = containers
+                .iter()
+                .position(|container| &container.service == service)
+            else {
+                failures.push(format!(
+                    "{project_name}: service {service} has no container"
+                ));
+                project_failed = true;
+                break;
+            };
+            if let Err(error) = start_and_inject_apple_compose_container(index, &mut containers) {
+                failures.push(format!("{project_name}/{service}: {error}"));
+                project_failed = true;
+                break;
+            }
+            restored += 1;
+        }
+        if !project_failed {
+            if let Err(error) = refresh_live_apple_group_hosts(&mut containers) {
+                failures.push(format!("{project_name}: {error}"));
+            }
+        }
+
+        if let Some(project) = state.projects.get_mut(&project_name) {
+            for service in targets {
+                if project.policies.get(&service) == Some(&ComposeRestartPolicy::Always) {
+                    project.manually_stopped.remove(&service);
+                }
+            }
+        }
+    }
+
+    write_apple_compose_restore_state(app, &state)?;
+    if failures.is_empty() {
+        Ok(restored)
+    } else {
+        Err(format!(
+            "Apple Container is running, but some Compose services could not be restored: {}",
+            failures.join("; ")
+        ))
+    }
 }
 
 fn hosts_for_container(
@@ -1690,7 +1984,7 @@ fn repair_mocker_service_discovery(
             !container.running
                 && policies
                     .get(&container.service)
-                    .is_some_and(|policy| policy.restartable)
+                    .is_some_and(|policy| policy.restart.restarts_after_exit())
         })
         .map(|container| container.service.clone())
         .collect::<Vec<_>>();
@@ -1730,7 +2024,7 @@ fn repair_mocker_service_discovery(
             !container.running
                 && policies
                     .get(&container.service)
-                    .is_some_and(|policy| policy.restartable)
+                    .is_some_and(|policy| policy.restart.restarts_after_exit())
         })
         .map(|container| container.service.clone())
         .collect::<Vec<_>>();
@@ -2029,6 +2323,18 @@ pub async fn compose_up(
             let _ = app.emit("compose-progress", "error");
             return Err(error);
         }
+        let _ = app.emit(
+            "compose-progress",
+            "Tool Restart-policy Saving recovery state",
+        );
+        if let Err(error) = register_apple_compose_project(&app, &mocker, &file_path) {
+            let _ = app.emit("compose-progress", "Tool Restart-policy Failed");
+            let _ = app.emit("compose-progress", "error");
+            return Err(format!(
+                "Apple Compose started, but its restart policy could not be saved: {error}"
+            ));
+        }
+        let _ = app.emit("compose-progress", "Tool Restart-policy Ready");
     }
     let _ = app.emit("compose-progress", "done");
     Ok(output)
@@ -2037,11 +2343,12 @@ pub async fn compose_up(
 #[cfg(test)]
 mod compose_tests {
     use super::{
-        apple_compose_container_from_inspect, clean_terminal_fragment, hosts_for_container,
-        published_ports_from_compose, restart_policy_enabled, rewrite_hosts,
+        apple_compose_container_from_inspect, clean_terminal_fragment, compose_restart_policy,
+        hosts_for_container, published_ports_from_compose, restart_policy_enabled, rewrite_hosts,
+        services_to_restore, AppleComposeProjectState, ComposeRestartPolicy,
         MockerComposeContainer, PublishedPort, COMPOSE_HOSTS_BEGIN, COMPOSE_HOSTS_END,
     };
-    use std::collections::{BTreeSet, HashSet};
+    use std::collections::{BTreeMap, BTreeSet, HashSet};
 
     #[test]
     fn extracts_published_ports_from_short_and_long_syntax() {
@@ -2113,6 +2420,7 @@ services:
     fn includes_self_and_peer_aliases_on_the_shared_network() {
         let kafka = MockerComposeContainer {
             id: "demo-kafka-1".to_string(),
+            project: "demo".to_string(),
             service: "kafka".to_string(),
             network: "demo-network".to_string(),
             ip: "192.168.65.3".to_string(),
@@ -2120,6 +2428,7 @@ services:
         };
         let registry = MockerComposeContainer {
             id: "demo-schema-registry-1".to_string(),
+            project: "demo".to_string(),
             service: "schema-registry".to_string(),
             network: "demo-network".to_string(),
             ip: "192.168.65.4".to_string(),
@@ -2145,6 +2454,47 @@ services:
             "no".to_string()
         ))));
         assert!(!restart_policy_enabled(None));
+        assert_eq!(
+            compose_restart_policy(Some(&serde_yaml::Value::String(
+                "unless-stopped".to_string()
+            ))),
+            ComposeRestartPolicy::UnlessStopped
+        );
+    }
+
+    #[test]
+    fn restores_always_and_eligible_unless_stopped_services() {
+        let project = AppleComposeProjectState {
+            file_path: "/tmp/compose.yaml".to_string(),
+            service_order: vec![
+                "db".to_string(),
+                "cache".to_string(),
+                "worker".to_string(),
+                "job".to_string(),
+            ],
+            policies: [
+                ("db".to_string(), ComposeRestartPolicy::Always),
+                ("cache".to_string(), ComposeRestartPolicy::UnlessStopped),
+                ("worker".to_string(), ComposeRestartPolicy::UnlessStopped),
+                ("job".to_string(), ComposeRestartPolicy::OnFailure),
+            ]
+            .into_iter()
+            .collect::<BTreeMap<_, _>>(),
+            manually_stopped: ["worker".to_string()].into_iter().collect(),
+        };
+        let containers = ["db", "cache", "worker", "job"]
+            .into_iter()
+            .map(|service| MockerComposeContainer {
+                id: format!("demo-{service}-1"),
+                project: "demo".to_string(),
+                service: service.to_string(),
+                network: "demo-network".to_string(),
+                ip: String::new(),
+                running: false,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(services_to_restore(&project, &containers), ["db", "cache"]);
     }
 
     #[test]

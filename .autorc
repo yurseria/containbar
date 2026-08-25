@@ -1,7 +1,18 @@
 {
   "baseBranch": "release",
   "plugins": [
+    [
+      "exec",
+      {
+        "version": "node scripts/sync-version.mjs"
+      }
+    ],
     "git-tag",
-    "conventional-commits"
+    [
+      "conventional-commits",
+      {
+        "defaultReleaseType": "patch"
+      }
+    ]
   ]
 }
