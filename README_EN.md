@@ -28,7 +28,7 @@
 ### Docker Runtime
 - **Built-in Runtime**: Bundles Colima (lightweight VM) — works without Docker Desktop or OrbStack
 - **External Runtime Support**: Auto-detects Docker Desktop, OrbStack, etc.
-- **Apple Container**: Supports Apple's `container` CLI on macOS 26+ with Apple Silicon (Docker Compose excluded)
+- **Apple Container**: Supports Apple's `container` CLI on macOS 26+ with Apple Silicon and installs Mocker on demand for Compose
 - **Auto Start**: Launches built-in runtime if no external Docker is found
 - **Start at Login**: Toggle in Settings
 
@@ -36,7 +36,7 @@
 - **System Tray**: Lives in your menubar, click to toggle, right-click to quit
 - **Container Lifecycle**: Start, stop, restart, remove
 - **Group Control**: Start/stop/remove entire Compose groups
-- **Compose Support**: Import and run `docker-compose.yaml` files
+- **Compose Support**: Import and run `docker-compose.yaml` files (Docker Compose on Docker/Colima, Mocker on Apple Container). When switching to Apple, Docker Tray identifies an existing Compose project that owns conflicting ports and can stop it after explicit confirmation.
 - **Image Management**: Pull, create containers from, and remove images
 - **Volume & Network**: Browse and remove
 - **Search/Filter**: Filter across all tabs by name, image, or driver

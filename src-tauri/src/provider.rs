@@ -10,12 +10,11 @@ use tauri::{AppHandle, Manager};
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
-    /// Use a Docker Engine socket — external (Docker Desktop / OrbStack) if
-    /// available, otherwise auto-start the bundled Colima. Preserves the
-    /// pre-Apple behavior and is the default.
+    /// Use an external Docker Engine socket (Docker Desktop / OrbStack).
+    /// This never falls back to Colima; provider selection is explicit.
     #[default]
     Docker,
-    /// Drive Apple's native `container` CLI (macOS 15+/26+, Apple Silicon).
+    /// Drive Apple's native `container` CLI (macOS 26+, Apple Silicon).
     Apple,
     /// Force the bundled Colima VM even if an external Docker socket exists.
     Colima,
@@ -55,6 +54,17 @@ fn provider_config_path(app: &AppHandle) -> Option<PathBuf> {
         .app_config_dir()
         .ok()
         .map(|d| d.join("provider.json"))
+}
+
+/// Whether the user has completed runtime selection at least once.
+///
+/// Older builds silently defaulted to Docker when this file was absent. The
+/// setup wizard now uses a valid file as the durable first-run marker.
+pub fn setup_complete(app: &AppHandle) -> bool {
+    provider_config_path(app)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|content| serde_json::from_str::<ProviderFile>(&content).ok())
+        .is_some()
 }
 
 #[derive(Serialize, Deserialize)]

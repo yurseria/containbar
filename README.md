@@ -28,7 +28,7 @@
 ### Docker 런타임
 - **내장 런타임**: Colima 기반 경량 VM을 번들하여 Docker Desktop/OrbStack 없이 독립 실행
 - **외부 런타임 호환**: Docker Desktop, OrbStack 등 기존 런타임이 있으면 자동 감지하여 사용
-- **Apple Container**: macOS 26 이상 Apple Silicon에서 Apple `container` CLI 지원 (Docker Compose 제외)
+- **Apple Container**: macOS 26 이상 Apple Silicon에서 Apple `container` CLI 지원, Compose 실행 시 Mocker 자동 설치
 - **자동 시작**: 앱 실행 시 Docker가 없으면 내장 런타임 자동 시작
 - **로그인 시 실행**: Settings에서 "Start at Login" 토글
 
@@ -36,7 +36,7 @@
 - **시스템 트레이**: 메뉴바에 상주하며 클릭으로 토글, 우클릭으로 Quit
 - **컨테이너 관리**: 시작, 중지, 재시작, 삭제
 - **그룹 제어**: Compose 그룹 단위 시작/중지/삭제
-- **Compose 지원**: `docker-compose.yaml` 파일 불러와서 실행
+- **Compose 지원**: `docker-compose.yaml` 파일 불러와서 실행 (Docker/Colima는 Docker Compose, Apple Container는 Mocker 사용). Apple 전환 시 포트를 점유한 기존 Compose 프로젝트를 식별하고, 사용자 확인 후 안전하게 중지하고 계속할 수 있습니다.
 - **이미지 관리**: Pull, 이미지에서 컨테이너 생성, 삭제
 - **볼륨 & 네트워크**: 조회 및 삭제
 - **검색/필터**: 모든 탭에서 이름, 이미지, 드라이버로 검색

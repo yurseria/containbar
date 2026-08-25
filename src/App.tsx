@@ -10,7 +10,8 @@ import { Settings, getSettings } from "./components/Settings";
 import { PullImageDialog } from "./components/PullImageDialog";
 import { CreateContainerDialog } from "./components/CreateContainerDialog";
 import { ComposeDialog } from "./components/ComposeDialog";
-import type { Tab, Provider } from "./types";
+import { RuntimeSetup } from "./components/RuntimeSetup";
+import type { Tab, Provider, RuntimeOverview } from "./types";
 import { providerCapabilities } from "./types";
 import "./App.css";
 
@@ -26,10 +27,14 @@ const TABS: { key: Tab; label: string; iconClass: string }[] = [
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>("containers");
   const [showSettings, setShowSettings] = useState(false);
+  const [showRuntimeManager, setShowRuntimeManager] = useState(false);
   const [dialog, setDialog] = useState<DialogType>(null);
   const [createImage, setCreateImage] = useState<string | undefined>();
   const [search, setSearch] = useState("");
   const [provider, setProvider] = useState<Provider>("docker");
+  const [runtimeOverview, setRuntimeOverview] = useState<RuntimeOverview | null>(null);
+  const [runtimeOverviewError, setRuntimeOverviewError] = useState<string | null>(null);
+  const [busyProvider, setBusyProvider] = useState<Provider | null>(null);
 
   const caps = providerCapabilities(provider);
 
@@ -60,6 +65,21 @@ function App() {
       .catch(() => {});
   }, []);
 
+  const refreshRuntimeOverview = useCallback(async () => {
+    try {
+      const overview = await invoke<RuntimeOverview>("runtime_overview");
+      setRuntimeOverview(overview);
+      setProvider(overview.selected);
+      setRuntimeOverviewError(null);
+    } catch (error) {
+      setRuntimeOverviewError(String(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshRuntimeOverview();
+  }, [refreshRuntimeOverview]);
+
   useEffect(() => {
     const ms = getSettings().refreshInterval * 1000;
     const interval = setInterval(fetchCurrentTab, ms);
@@ -70,7 +90,6 @@ function App() {
   const [runtimeStatus, setRuntimeStatus] = useState("");
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [runtimeHint, setRuntimeHint] = useState("No Docker runtime detected");
-  const [hasBuiltinRuntime, setHasBuiltinRuntime] = useState(false);
 
   // Check runtime status on mount when disconnected
   useEffect(() => {
@@ -78,7 +97,6 @@ function App() {
       invoke<{ kind: string; running: boolean; message: string }>("runtime_status")
         .then((s) => {
           setRuntimeHint(s.message);
-          setHasBuiltinRuntime(s.kind === "Builtin" || s.kind === "None");
           // If already starting in background, show spinner and start polling
           if (s.message === "Starting runtime...") {
             setRuntimeLoading(true);
@@ -146,9 +164,93 @@ function App() {
     startPolling();
   };
 
-  if (!docker.connected) {
+  const switchRuntime = async (nextProvider: Provider) => {
+    if (busyProvider) return;
+    setBusyProvider(nextProvider);
+    setRuntimeOverviewError(null);
+    docker.disconnect();
+    try {
+      const overview = await invoke<RuntimeOverview>("switch_provider", { provider: nextProvider });
+      setRuntimeOverview(overview);
+      setProvider(overview.selected);
+      if (!(await ping())) {
+        throw new Error(`${nextProvider} started, but the app could not connect.`);
+      }
+      fetchCurrentTab();
+      setShowSettings(false);
+      setShowRuntimeManager(false);
+    } catch (error) {
+      await refreshRuntimeOverview();
+      setRuntimeOverviewError(String(error));
+      await ping();
+      throw error;
+    } finally {
+      setBusyProvider(null);
+    }
+  };
+
+  if (!runtimeOverview) {
     return (
       <div className="app" ref={appRef}>
+        <div className="runtime-boot" role="status">
+          <div className="runtime-spinner" />
+          <span>{runtimeOverviewError || "Checking installed runtimes…"}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!runtimeOverview.setup_complete) {
+    return (
+      <div className="app runtime-app" ref={appRef}>
+        <div className="titlebar">
+          <span className="titlebar-text">Docker Tray</span>
+        </div>
+        <RuntimeSetup
+          overview={runtimeOverview}
+          busyProvider={busyProvider}
+          error={runtimeOverviewError}
+          onSelect={switchRuntime}
+        />
+      </div>
+    );
+  }
+
+  if (!docker.connected) {
+    if (showRuntimeManager) {
+      return (
+        <div className="app runtime-app" ref={appRef}>
+          <div className="titlebar">
+            <button
+              className="settings-btn"
+              onClick={() => setShowRuntimeManager(false)}
+              title="Back"
+            >
+              <i className="ri-arrow-left-line" />
+            </button>
+            <span className="titlebar-text">Runtimes</span>
+          </div>
+          <RuntimeSetup
+            overview={runtimeOverview}
+            busyProvider={busyProvider}
+            error={runtimeOverviewError}
+            onSelect={switchRuntime}
+          />
+        </div>
+      );
+    }
+    return (
+      <div className="app" ref={appRef}>
+        <div className="titlebar">
+          <span className="titlebar-text">Docker Tray</span>
+          <button
+            className="settings-btn"
+            onClick={() => { refreshRuntimeOverview(); setShowRuntimeManager(true); }}
+            title="Change Runtime"
+          >
+            <i className="ri-instance-line" />
+          </button>
+        </div>
         <div className="disconnected">
           {runtimeLoading ? (
             <>
@@ -159,22 +261,25 @@ function App() {
           ) : (
             <>
               <i className="ri-server-line disconnected-icon" />
-              <div className="disconnected-text">Docker not available</div>
+              <div className="disconnected-text">Runtime not available</div>
               <div className="disconnected-hint">{runtimeHint}</div>
             </>
           )}
           {runtimeError && <div className="disconnected-error">{runtimeError}</div>}
           {!runtimeLoading && (
             <div className="disconnected-actions">
-              {hasBuiltinRuntime ? (
+              {provider !== "docker" ? (
                 <button className="retry-btn primary" onClick={startRuntime}>
-                  <i className="ri-play-fill" /> Start Built-in Runtime
+                  <i className="ri-play-fill" /> Start Runtime
                 </button>
               ) : (
                 <button className="retry-btn" onClick={ping}>
                   <i className="ri-refresh-line" /> Retry Connection
                 </button>
               )}
+              <button className="retry-btn" onClick={() => { refreshRuntimeOverview(); setShowRuntimeManager(true); }}>
+                <i className="ri-instance-line" /> Change Runtime
+              </button>
             </div>
           )}
         </div>
@@ -212,7 +317,10 @@ function App() {
         )}
         <button
           className="settings-btn"
-          onClick={() => setShowSettings((v) => !v)}
+          onClick={() => {
+            refreshRuntimeOverview();
+            setShowSettings((v) => !v);
+          }}
           title="Settings"
         >
           <i className="ri-settings-3-line" />
@@ -222,6 +330,9 @@ function App() {
       {showSettings ? (
         <Settings
           onClose={() => setShowSettings(false)}
+          runtimeOverview={runtimeOverview}
+          runtimeBusy={busyProvider}
+          runtimeError={runtimeOverviewError}
           onVmRestart={() => {
             setShowSettings(false);
             setRuntimeLoading(true);
@@ -230,16 +341,7 @@ function App() {
             docker.disconnect();
             startPolling();
           }}
-          onProviderChange={(p) => {
-            setProvider(p);
-            setShowSettings(false);
-            // Force a reconnect to the newly selected runtime. The backend has
-            // already cleared any stale client; poll until it answers.
-            setRuntimeError(null);
-            setRuntimeStatus("Switching runtime...");
-            docker.disconnect();
-            ping();
-          }}
+          onProviderChange={switchRuntime}
         />
       ) : (
         <>
@@ -285,6 +387,8 @@ function App() {
                 onStart={docker.startContainer}
                 onStop={docker.stopContainer}
                 onRestart={docker.restartContainer}
+                onStartGroup={docker.startContainerGroup}
+                onStopGroup={docker.stopContainerGroup}
                 onRemove={docker.removeContainer}
                 getEnv={docker.getContainerEnv}
               />

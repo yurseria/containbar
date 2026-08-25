@@ -8,16 +8,38 @@ interface Props {
   containerName: string;
 }
 
+/**
+ * Apple Container can only return a fresh tail snapshot, not logs since a
+ * cursor. Keep the longest previous-suffix/current-prefix overlap and append
+ * only the lines that appeared after it.
+ */
+function newLinesFromSnapshot(previous: string[], current: string[]): string[] {
+  const maxOverlap = Math.min(previous.length, current.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    let matches = true;
+    const previousStart = previous.length - overlap;
+    for (let index = 0; index < overlap; index += 1) {
+      if (previous[previousStart + index] !== current[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return current.slice(overlap);
+  }
+  return current;
+}
+
 export function LogWindow({ containerId, containerName }: Props) {
   const [logs, setLogs] = useState<string[]>([]);
   const [follow, setFollow] = useState(true);
   const [lineWrap, setLineWrap] = useState(true);
   const [timestamps, setTimestamps] = useState(false);
-  const [provider, setProvider] = useState<Provider>("docker");
-  const caps = providerCapabilities(provider);
+  const [provider, setProvider] = useState<Provider | null>(null);
+  const caps = providerCapabilities(provider ?? "apple");
   const bottomRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const lastFetchRef = useRef<number>(0);
+  const appleSnapshotRef = useRef<string[]>([]);
 
   useEffect(() => {
     invoke<Provider>("get_provider").then(setProvider).catch(() => {});
@@ -33,6 +55,7 @@ export function LogWindow({ containerId, containerName }: Props) {
           timestamps,
         });
         setLogs(lines);
+        appleSnapshotRef.current = lines;
         lastFetchRef.current = Math.floor(Date.now() / 1000);
       } catch {
         // ignore
@@ -44,14 +67,21 @@ export function LogWindow({ containerId, containerName }: Props) {
   // Incremental polling
   useEffect(() => {
     const poll = setInterval(async () => {
-      if (lastFetchRef.current === 0) return;
+      if (provider === null || lastFetchRef.current === 0) return;
       try {
         const newLines = await invoke<string[]>("get_container_logs_since", {
           id: containerId,
           since: lastFetchRef.current,
           timestamps,
         });
-        if (newLines.length > 0) {
+        if (provider === "apple") {
+          const delta = newLinesFromSnapshot(appleSnapshotRef.current, newLines);
+          appleSnapshotRef.current = newLines;
+          if (delta.length > 0) {
+            setLogs((prev) => [...prev, ...delta]);
+          }
+          lastFetchRef.current = Math.floor(Date.now() / 1000);
+        } else if (newLines.length > 0) {
           setLogs((prev) => [...prev, ...newLines]);
           lastFetchRef.current = Math.floor(Date.now() / 1000);
         }
@@ -60,7 +90,7 @@ export function LogWindow({ containerId, containerName }: Props) {
       }
     }, 1000);
     return () => clearInterval(poll);
-  }, [containerId, timestamps]);
+  }, [containerId, provider, timestamps]);
 
   // Follow tail
   useEffect(() => {

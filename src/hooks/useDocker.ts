@@ -121,6 +121,26 @@ export function useDocker() {
     [fetchContainers, withError]
   );
 
+  const startContainerGroup = useCallback(
+    async (ids: string[]) => {
+      await withError(async () => {
+        await invoke("start_container_group", { ids });
+        await fetchContainers();
+      });
+    },
+    [fetchContainers, withError]
+  );
+
+  const stopContainerGroup = useCallback(
+    async (ids: string[]) => {
+      await withError(async () => {
+        await invoke("stop_container_group", { ids });
+        await fetchContainers();
+      });
+    },
+    [fetchContainers, withError]
+  );
+
   const removeContainer = useCallback(
     async (id: string, force?: boolean) => {
       await withError(async () => {
@@ -233,6 +253,8 @@ export function useDocker() {
     startContainer,
     stopContainer,
     restartContainer,
+    startContainerGroup,
+    stopContainerGroup,
     removeContainer,
     removeImage,
     removeVolume,

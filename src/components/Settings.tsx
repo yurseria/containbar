@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { Provider } from "../types";
+import type { Provider, RuntimeOverview } from "../types";
 import { providerCapabilities } from "../types";
+import { RuntimePicker } from "./RuntimeSetup";
 
 interface SettingsData {
   terminal: string;
@@ -44,8 +45,10 @@ export function applyScale(scale: number) {
 interface Props {
   onClose: () => void;
   onVmRestart?: () => void;
-  /** Called after the user picks a different runtime provider. */
-  onProviderChange?: (provider: Provider) => void;
+  runtimeOverview: RuntimeOverview | null;
+  runtimeBusy: Provider | null;
+  runtimeError: string | null;
+  onProviderChange: (provider: Provider) => Promise<void>;
 }
 
 interface VmConfig {
@@ -63,7 +66,14 @@ interface UpdateInfo {
 
 type UpdateStatus = "idle" | "checking" | "up-to-date" | "update-available" | "error";
 
-export function Settings({ onClose, onVmRestart, onProviderChange }: Props) {
+export function Settings({
+  onClose,
+  onVmRestart,
+  runtimeOverview,
+  runtimeBusy,
+  runtimeError,
+  onProviderChange,
+}: Props) {
   const [settings, setSettings] = useState<SettingsData>(loadSettings);
   const [detectedTerminal, setDetectedTerminal] = useState("...");
   const [autostart, setAutostart] = useState(false);
@@ -130,12 +140,11 @@ export function Settings({ onClose, onVmRestart, onProviderChange }: Props) {
   // mirrors into the localStorage settings for quick UI reads.
   const changeProvider = async (provider: Provider) => {
     try {
-      await invoke("set_provider", { provider });
+      await onProviderChange(provider);
+      update({ provider });
     } catch (e) {
       console.error("Failed to set provider:", e);
     }
-    update({ provider });
-    onProviderChange?.(provider);
   };
 
   const caps = providerCapabilities(settings.provider);
@@ -163,20 +172,17 @@ export function Settings({ onClose, onVmRestart, onProviderChange }: Props) {
       <div className="settings-content">
         <div className="settings-group">
           <label className="settings-label">Runtime</label>
-          <select
-            className="settings-select"
-            value={settings.provider}
-            onChange={(e) => changeProvider(e.target.value as Provider)}
-          >
-            <option value="docker">Docker</option>
-            <option value="apple">Apple Container</option>
-            <option value="colima">Built-in (Colima)</option>
-          </select>
-          <span className="settings-hint">
-            {settings.provider === "apple"
-              ? "Requires macOS 15+/26+ & Apple Silicon"
-              : "Restart the app after switching for a clean reconnect"}
-          </span>
+          {runtimeOverview ? (
+            <RuntimePicker
+              overview={runtimeOverview}
+              busyProvider={runtimeBusy}
+              error={runtimeError}
+              compact
+              onSelect={changeProvider}
+            />
+          ) : (
+            <span className="settings-hint">Checking installed runtimes…</span>
+          )}
         </div>
 
         <div className="settings-group">
