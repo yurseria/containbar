@@ -8,12 +8,20 @@
 
 use crate::docker::{ContainerGroup, ContainerInfo, ImageInfo, NetworkInfo, PortInfo, VolumeInfo};
 use serde_json::Value;
-use std::collections::HashMap;
-use std::process::Command;
+use std::collections::{BTreeMap, HashMap};
+use std::process::{Command, Stdio};
 
 /// Resolve the `container` binary. Allows overriding via CONTAINER_BIN for dev.
-fn container_bin() -> String {
-    std::env::var("CONTAINER_BIN").unwrap_or_else(|_| "container".to_string())
+pub(crate) fn container_bin() -> String {
+    if let Ok(path) = std::env::var("CONTAINER_BIN") {
+        return path;
+    }
+    for path in ["/opt/homebrew/bin/container", "/usr/local/bin/container"] {
+        if std::path::Path::new(path).is_file() {
+            return path.to_string();
+        }
+    }
+    "container".to_string()
 }
 
 /// Build a `container` command.
@@ -69,6 +77,23 @@ fn pick_str(obj: &Value, keys: &[&str]) -> String {
     pick(obj, keys).map(val_string).unwrap_or_default()
 }
 
+fn pointer_str(obj: &Value, pointers: &[&str]) -> String {
+    pointers
+        .iter()
+        .find_map(|pointer| obj.pointer(pointer).and_then(Value::as_str))
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn string_map(value: Option<&Value>) -> HashMap<String, String> {
+    value
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, value)| value.as_str().map(|value| (key.clone(), value.to_string())))
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Detection
 // ---------------------------------------------------------------------------
@@ -82,15 +107,34 @@ pub fn apple_container_available() -> bool {
         .unwrap_or(false)
 }
 
+/// True when the Apple Container API service is healthy. Unlike `container
+/// list`, this probe does not depend on any resource-list output format.
+pub fn system_running() -> bool {
+    Command::new(container_bin())
+        .args(["system", "status", "--format", "json"])
+        .stdin(Stdio::null())
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
 /// Ensure the Containerization framework backend is running. Idempotent.
 /// `container system start` returns success if already running.
 pub fn system_start() -> Result<(), String> {
+    if system_running() {
+        return Ok(());
+    }
+
     let (_out, err, ok) = {
         let mut c = container_cmd();
-        c.args(["system", "start"]);
+        // The CLI prompts about installing its default Linux kernel unless
+        // one of these flags is supplied. GUI processes have no interactive
+        // stdin, so opt into the recommended kernel explicitly.
+        c.args(["system", "start", "--enable-kernel-install"])
+            .stdin(Stdio::null());
         run(&mut c)
     }?;
-    if ok {
+    if ok && system_running() {
         return Ok(());
     }
     Err(format!(
@@ -106,33 +150,173 @@ pub fn system_start() -> Result<(), String> {
 /// Parse one container row from `container list --format json`.
 /// The schema is undocumented, so we probe common key spellings.
 fn container_from_json(obj: &Value) -> ContainerInfo {
-    let id = pick_str(obj, &["id", "name", "containerID", "container_id"]);
-    let image = pick_str(obj, &["image", "imageRef", "image_ref"]);
-    let state = pick_str(obj, &["state", "status"]);
-
-    let names = {
-        let mut n = vec![id.clone()];
-        // Avoid duplicate entry if name === id (Apple treats them as equal).
-        n.dedup();
-        n
+    let id = {
+        let top_level = pick_str(obj, &["id", "name", "containerID", "container_id"]);
+        if top_level.is_empty() {
+            pointer_str(obj, &["/configuration/id"])
+        } else {
+            top_level
+        }
     };
-
-    // Ports: Apple list output may not include port mappings; left empty here.
-    // Inspect (env/mounts) is the source of truth for richer detail.
-    let ports: Vec<PortInfo> = Vec::new();
+    let image = {
+        let reference = pointer_str(
+            obj,
+            &["/configuration/image/reference", "/configuration/imageRef"],
+        );
+        if reference.is_empty() {
+            pick_str(obj, &["image", "imageRef", "image_ref"])
+        } else {
+            reference
+        }
+    };
+    let state = {
+        let nested = pointer_str(obj, &["/status/state"]);
+        if nested.is_empty() {
+            pick(obj, &["state", "status"])
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            nested
+        }
+    };
+    let status = if state.is_empty() {
+        "unknown".to_string()
+    } else {
+        state.clone()
+    };
+    let created = obj
+        .pointer("/configuration/creationDate")
+        .and_then(Value::as_str)
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp())
+        .or_else(|| {
+            pick(obj, &["created", "createdAt", "created_at", "creation"]).and_then(Value::as_i64)
+        })
+        .unwrap_or(0);
+    let ports = obj
+        .pointer("/configuration/publishedPorts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|port| {
+            Some(PortInfo {
+                private_port: port.get("containerPort")?.as_u64()?.try_into().ok()?,
+                public_port: port
+                    .get("hostPort")
+                    .and_then(Value::as_u64)
+                    .and_then(|port| port.try_into().ok()),
+                port_type: port
+                    .get("proto")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tcp")
+                    .to_string(),
+            })
+        })
+        .collect();
+    let labels = string_map(
+        obj.pointer("/configuration/labels")
+            .or_else(|| obj.get("labels")),
+    );
 
     ContainerInfo {
-        id: id.chars().take(12).collect(),
-        names,
+        // Apple uses human-readable names as IDs. Truncating them made every
+        // service in a Compose project share the same React key and action ID.
+        id: id.clone(),
+        names: vec![id],
         image,
         state,
-        status: pick_str(obj, &["status", "state"]),
+        status,
         ports,
-        created: pick(obj, &["created", "createdAt", "created_at", "creation"])
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0),
-        labels: HashMap::new(),
+        created,
+        labels,
     }
+}
+
+fn labels_from_mocker_inspect(obj: &Value) -> HashMap<String, String> {
+    string_map(
+        obj.pointer("/Config/Labels")
+            .or_else(|| obj.pointer("/config/labels"))
+            .or_else(|| obj.get("labels")),
+    )
+}
+
+fn mocker_container_labels() -> HashMap<String, HashMap<String, String>> {
+    let Some(mocker) = crate::runtime::mocker_cli() else {
+        return HashMap::new();
+    };
+    let Ok(ids) = Command::new(&mocker).args(["ps", "-a", "-q"]).output() else {
+        return HashMap::new();
+    };
+    if !ids.status.success() {
+        return HashMap::new();
+    }
+    let ids = String::from_utf8_lossy(&ids.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if ids.is_empty() {
+        return HashMap::new();
+    }
+
+    let Ok(inspect) = Command::new(mocker).arg("inspect").args(&ids).output() else {
+        return HashMap::new();
+    };
+    if !inspect.status.success() {
+        return HashMap::new();
+    }
+    let Ok(items) = serde_json::from_slice::<Vec<Value>>(&inspect.stdout) else {
+        return HashMap::new();
+    };
+
+    let mut by_identifier = HashMap::new();
+    for item in items {
+        let labels = labels_from_mocker_inspect(&item);
+        if labels.is_empty() {
+            continue;
+        }
+        for identifier in [
+            pick_str(&item, &["Id", "ID", "id", "containerID", "container_id"]),
+            pick_str(&item, &["Name", "name"])
+                .trim_start_matches('/')
+                .to_string(),
+        ] {
+            if !identifier.is_empty() {
+                by_identifier.insert(identifier.clone(), labels.clone());
+                by_identifier.insert(identifier.chars().take(12).collect(), labels.clone());
+            }
+        }
+    }
+    by_identifier
+}
+
+fn group_apple_containers(containers: Vec<ContainerInfo>) -> Vec<ContainerGroup> {
+    let mut groups = BTreeMap::<String, Vec<ContainerInfo>>::new();
+    let mut standalone = Vec::new();
+    for container in containers {
+        let project = container
+            .labels
+            .get("com.mocker.compose.project")
+            .or_else(|| container.labels.get("com.docker.compose.project"))
+            .cloned();
+        if let Some(project) = project {
+            groups.entry(project).or_default().push(container);
+        } else {
+            standalone.push(container);
+        }
+    }
+
+    let mut result = groups
+        .into_iter()
+        .map(|(name, containers)| ContainerGroup { name, containers })
+        .collect::<Vec<_>>();
+    if !standalone.is_empty() {
+        result.push(ContainerGroup {
+            name: "Standalone".to_string(),
+            containers: standalone,
+        });
+    }
+    result
 }
 
 pub fn list_containers() -> Result<Vec<ContainerGroup>, String> {
@@ -160,22 +344,213 @@ pub fn list_containers() -> Result<Vec<ContainerGroup>, String> {
             .map_err(|e| format!("Invalid list JSON line: {e}"))?
     };
 
-    let containers: Vec<ContainerInfo> = items.iter().map(container_from_json).collect();
+    let mut containers = items.iter().map(container_from_json).collect::<Vec<_>>();
 
-    // Apple Container has no compose concept — everything is standalone.
-    Ok(if containers.is_empty() {
-        Vec::new()
-    } else {
-        vec![ContainerGroup {
-            name: "Standalone".to_string(),
-            containers,
-        }]
-    })
+    // Current Apple output includes Mocker labels under configuration.labels.
+    // Keep the inspect fallback for older CLI versions that omit them.
+    if containers
+        .iter()
+        .any(|container| container.labels.is_empty())
+    {
+        let labels = mocker_container_labels();
+        for container in &mut containers {
+            let metadata = container
+                .names
+                .iter()
+                .chain(std::iter::once(&container.id))
+                .find_map(|identifier| labels.get(identifier));
+            if let Some(metadata) = metadata {
+                container.labels = metadata.clone();
+            }
+        }
+    }
+
+    Ok(group_apple_containers(containers))
 }
 
 // ---------------------------------------------------------------------------
 // Images
 // ---------------------------------------------------------------------------
+
+fn normalize_image_reference(reference: &str) -> String {
+    reference
+        .strip_prefix("docker.io/library/")
+        .or_else(|| reference.strip_prefix("docker.io/"))
+        .unwrap_or(reference)
+        .to_string()
+}
+
+fn image_variant_for_arch<'a>(obj: &'a Value, arch: &str) -> Option<&'a Value> {
+    let variants = obj.pointer("/variants")?.as_array()?;
+    variants
+        .iter()
+        .find(|variant| {
+            variant.pointer("/platform/os").and_then(Value::as_str) == Some("linux")
+                && variant
+                    .pointer("/platform/architecture")
+                    .and_then(Value::as_str)
+                    == Some(arch)
+        })
+        .or_else(|| {
+            variants
+                .iter()
+                .find(|variant| variant.get("size").is_some())
+        })
+}
+
+fn apple_image_from_json_for_arch(obj: &Value, arch: &str) -> ImageInfo {
+    let variant = image_variant_for_arch(obj, arch);
+    let id = pointer_str(obj, &["/configuration/descriptor/digest"]);
+    let id = if id.is_empty() {
+        pick_str(obj, &["id", "digest", "imageID", "image_id"])
+    } else {
+        id
+    };
+
+    let mut repo_tags = Vec::new();
+    let nested_name = pointer_str(obj, &["/configuration/name"]);
+    if !nested_name.is_empty() {
+        repo_tags.push(normalize_image_reference(&nested_name));
+    } else if let Some(value) = pick(obj, &["name", "reference", "repoTags", "repo_tags"]) {
+        match value {
+            Value::String(tag) => repo_tags.push(normalize_image_reference(tag)),
+            Value::Array(tags) => repo_tags.extend(
+                tags.iter()
+                    .filter_map(Value::as_str)
+                    .map(normalize_image_reference),
+            ),
+            _ => {}
+        }
+    }
+
+    let created = obj
+        .pointer("/configuration/creationDate")
+        .and_then(Value::as_str)
+        .or_else(|| variant.and_then(|variant| variant.pointer("/config/created")?.as_str()))
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp())
+        .or_else(|| {
+            pick(obj, &["created", "createdAt", "created_at", "creation"]).and_then(Value::as_i64)
+        })
+        .unwrap_or(0);
+
+    ImageInfo {
+        id: id.trim_start_matches("sha256:").chars().take(12).collect(),
+        repo_tags,
+        // An image index contains every platform. Show only the host platform's
+        // image size, as Docker does, instead of adding all variants together.
+        size: variant
+            .and_then(|variant| variant.get("size"))
+            .and_then(Value::as_i64)
+            .or_else(|| {
+                obj.pointer("/configuration/descriptor/size")
+                    .and_then(Value::as_i64)
+            })
+            .or_else(|| pick(obj, &["size", "fullSize", "full_size"]).and_then(Value::as_i64))
+            .unwrap_or(0),
+        created,
+    }
+}
+
+fn apple_image_from_json(obj: &Value) -> ImageInfo {
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "amd64",
+        arch => arch,
+    };
+    apple_image_from_json_for_arch(obj, arch)
+}
+
+fn parse_mocker_size(value: &str) -> Option<i64> {
+    let mut parts = value.split_whitespace();
+    let amount = parts.next()?.parse::<f64>().ok()?;
+    let multiplier = match parts.next()?.to_ascii_uppercase().as_str() {
+        "B" => 1_f64,
+        "KB" => 1_000_f64,
+        "KIB" => 1_024_f64,
+        "MB" => 1_000_000_f64,
+        "MIB" => 1_048_576_f64,
+        "GB" => 1_000_000_000_f64,
+        "GIB" => 1_073_741_824_f64,
+        "TB" => 1_000_000_000_000_f64,
+        "TIB" => 1_099_511_627_776_f64,
+        _ => return None,
+    };
+    Some((amount * multiplier).round() as i64)
+}
+
+fn list_mocker_images(apple_images: &[ImageInfo]) -> Option<Vec<ImageInfo>> {
+    let mocker = crate::runtime::mocker_cli()?;
+    let output = Command::new(mocker)
+        .args([
+            "images",
+            "--no-trunc",
+            "--format",
+            "{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let metadata = apple_images
+        .iter()
+        .map(|image| (image.id.as_str(), image))
+        .collect::<HashMap<_, _>>();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut images = Vec::<ImageInfo>::new();
+    let mut indexes = HashMap::<String, usize>::new();
+
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        let columns = line.split('\t').collect::<Vec<_>>();
+        if columns.len() != 4 {
+            continue;
+        }
+        let id = columns[2]
+            .trim_start_matches("sha256:")
+            .chars()
+            .take(12)
+            .collect::<String>();
+        if id.is_empty() {
+            continue;
+        }
+        let tag = if columns[0] == "<none>" || columns[1] == "<none>" {
+            None
+        } else {
+            Some(normalize_image_reference(&format!(
+                "{}:{}",
+                columns[0], columns[1]
+            )))
+        };
+
+        if let Some(index) = indexes.get(&id).copied() {
+            if let Some(tag) = tag {
+                if !images[index].repo_tags.contains(&tag) {
+                    images[index].repo_tags.push(tag);
+                }
+            }
+            continue;
+        }
+
+        let apple = metadata.get(id.as_str()).copied();
+        let image = ImageInfo {
+            id: id.clone(),
+            repo_tags: tag.into_iter().collect(),
+            size: apple
+                .filter(|image| image.size > 0)
+                .map(|image| image.size)
+                .or_else(|| parse_mocker_size(columns[3]))
+                .unwrap_or(0),
+            created: apple.map(|image| image.created).unwrap_or(0),
+        };
+        indexes.insert(id, images.len());
+        images.push(image);
+    }
+
+    (!images.is_empty() || apple_images.is_empty()).then_some(images)
+}
 
 pub fn list_images() -> Result<Vec<ImageInfo>, String> {
     let (stdout, stderr, ok) = {
@@ -201,42 +576,8 @@ pub fn list_images() -> Result<Vec<ImageInfo>, String> {
             .map_err(|e| format!("Invalid image list JSON line: {e}"))?
     };
 
-    Ok(items
-        .iter()
-        .map(|obj| {
-            let id = pick_str(obj, &["id", "digest", "imageID", "image_id"]);
-            ImageInfo {
-                // Keep parity with Docker display: strip the "sha256:" prefix and truncate.
-                id: id.trim_start_matches("sha256:").chars().take(12).collect(),
-                repo_tags: {
-                    let mut tags = Vec::new();
-                    if let Some(t) = pick(obj, &["name", "reference", "repoTags", "repo_tags"]) {
-                        match t {
-                            Value::String(s) => tags.push(s.clone()),
-                            Value::Array(arr) => {
-                                for a in arr {
-                                    if let Some(s) = a.as_str() {
-                                        tags.push(s.to_string());
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    if tags.is_empty() {
-                        tags.push(pick_str(obj, &["name", "reference"]));
-                    }
-                    tags.into_iter().filter(|s| !s.is_empty()).collect()
-                },
-                size: pick(obj, &["size", "fullSize", "full_size"])
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0),
-                created: pick(obj, &["created", "createdAt", "created_at", "creation"])
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0),
-            }
-        })
-        .collect())
+    let apple_images = items.iter().map(apple_image_from_json).collect::<Vec<_>>();
+    Ok(list_mocker_images(&apple_images).unwrap_or(apple_images))
 }
 
 // ---------------------------------------------------------------------------
@@ -418,8 +759,8 @@ pub fn get_container_logs(id: &str, tail: Option<&str>) -> Result<Vec<String>, S
 }
 
 /// Apple Container has no `--since` flag. As a fallback we fetch the last
-/// `tail` lines; the frontend already de-duplicates against previously shown
-/// content by content prefix matching.
+/// `tail` lines; the frontend treats this response as a rolling snapshot and
+/// appends only the non-overlapping suffix.
 pub fn get_container_logs_since(
     id: &str,
     _since: i64,
@@ -595,45 +936,66 @@ fn parse_mount(item: &Value) -> Option<crate::docker::MountInfo> {
 // ---------------------------------------------------------------------------
 
 pub fn list_volumes() -> Result<Vec<VolumeInfo>, String> {
-    let (stdout, stderr, ok) = {
-        let mut c = container_cmd();
-        c.args(["volume", "list", "--format", "json"]);
-        run(&mut c)
-    }?;
-    if !ok {
-        // Volume support may be absent on some builds; surface an empty list
-        // rather than crashing the UI.
-        let msg = last_error(&stderr);
-        if msg.to_lowercase().contains("unknown command") || msg.to_lowercase().contains("no such")
-        {
-            return Ok(Vec::new());
-        }
-        return Err(msg);
+    // Apple Compose is driven by Mocker, whose named volumes are host-backed
+    // directories under ~/.mocker. Showing native `container volume` entries
+    // here would hide the volumes actually used by Compose projects.
+    let Some(mocker) = crate::runtime::mocker_cli() else {
+        return Ok(Vec::new());
+    };
+    let names = Command::new(&mocker)
+        .args(["volume", "ls", "-q"])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("Failed to list Mocker volumes: {error}"))?;
+    if !names.status.success() {
+        return Err(last_error(&String::from_utf8_lossy(&names.stderr)));
     }
 
-    let trimmed = stdout.trim();
-    let items: Vec<Value> = if trimmed.is_empty() {
-        Vec::new()
-    } else if trimmed.starts_with('[') {
-        serde_json::from_str(trimmed).map_err(|e| format!("Invalid volume list JSON: {e}"))?
-    } else {
-        trimmed
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(serde_json::from_str::<Value>)
-            .collect::<Result<_, _>>()
-            .map_err(|e| format!("Invalid volume list JSON line: {e}"))?
-    };
+    let mut volumes = Vec::new();
+    for name in String::from_utf8_lossy(&names.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        let inspect = Command::new(&mocker)
+            .args(["volume", "inspect", name])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| format!("Failed to inspect Mocker volume {name}: {error}"))?;
+        if !inspect.status.success() {
+            return Err(last_error(&String::from_utf8_lossy(&inspect.stderr)));
+        }
+        let value = serde_json::from_slice::<Value>(&inspect.stdout)
+            .map_err(|error| format!("Invalid Mocker volume response for {name}: {error}"))?;
+        let item = value
+            .as_array()
+            .and_then(|items| items.first())
+            .unwrap_or(&value);
+        volumes.push(mocker_volume_from_json(item, name));
+    }
+    volumes.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(volumes)
+}
 
-    Ok(items
-        .iter()
-        .map(|obj| VolumeInfo {
-            name: pick_str(obj, &["name", "label"]),
-            driver: pick_str(obj, &["driver", "type"]).to_lowercase(),
-            mountpoint: pick_str(obj, &["mountpoint", "mountPoint", "mount_point", "path"]),
-            labels: HashMap::new(),
-        })
-        .collect())
+fn mocker_volume_from_json(obj: &Value, fallback_name: &str) -> VolumeInfo {
+    let name = pick_str(obj, &["name"]);
+    VolumeInfo {
+        name: if name.is_empty() {
+            fallback_name.to_string()
+        } else {
+            name
+        },
+        driver: {
+            let driver = pick_str(obj, &["driver"]);
+            if driver.is_empty() {
+                "local".to_string()
+            } else {
+                driver.to_lowercase()
+            }
+        },
+        mountpoint: pick_str(obj, &["mountpoint", "mountPoint", "mount_point", "path"]),
+        labels: string_map(obj.get("labels")),
+    }
 }
 
 pub fn list_networks() -> Result<Vec<NetworkInfo>, String> {
@@ -666,34 +1028,80 @@ pub fn list_networks() -> Result<Vec<NetworkInfo>, String> {
             .map_err(|e| format!("Invalid network list JSON line: {e}"))?
     };
 
+    let container_counts = apple_network_container_counts();
     Ok(items
         .iter()
-        .map(|obj| NetworkInfo {
-            id: pick_str(obj, &["id", "name"]).chars().take(12).collect(),
-            name: pick_str(obj, &["name", "id"]),
-            driver: pick_str(obj, &["driver", "plugin", "type"]).to_lowercase(),
-            scope: pick_str(obj, &["scope"]).to_lowercase(),
-            containers: pick(obj, &["containers"])
-                .and_then(|c| match c {
-                    Value::Array(a) => Some(a.len()),
-                    Value::Object(m) => Some(m.len()),
-                    _ => None,
-                })
-                .unwrap_or(0),
-        })
+        .map(|obj| apple_network_from_json(obj, &container_counts))
         .collect())
 }
 
+fn apple_network_container_counts() -> HashMap<String, usize> {
+    let Ok(output) = Command::new(container_bin())
+        .args(["list", "--all", "--format", "json"])
+        .stdin(Stdio::null())
+        .output()
+    else {
+        return HashMap::new();
+    };
+    if !output.status.success() {
+        return HashMap::new();
+    }
+    let Ok(items) = serde_json::from_slice::<Vec<Value>>(&output.stdout) else {
+        return HashMap::new();
+    };
+    let mut counts = HashMap::new();
+    for item in items {
+        let Some(networks) = item.pointer("/status/networks").and_then(Value::as_array) else {
+            continue;
+        };
+        for network in networks {
+            let Some(name) = network.pointer("/network").and_then(Value::as_str) else {
+                continue;
+            };
+            *counts.entry(name.to_string()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn apple_network_from_json(obj: &Value, counts: &HashMap<String, usize>) -> NetworkInfo {
+    let id = pick_str(obj, &["id"]);
+    let name = pointer_str(obj, &["/configuration/name"]);
+    let driver = pointer_str(obj, &["/configuration/plugin"]);
+    let mode = pointer_str(obj, &["/configuration/mode"]);
+    NetworkInfo {
+        // Apple uses the human-readable name as the real resource ID. Docker's
+        // 12-character hash truncation must not be applied here.
+        id: if id.is_empty() { name.clone() } else { id },
+        name: if name.is_empty() {
+            pick_str(obj, &["id"])
+        } else {
+            name.clone()
+        },
+        driver: if driver.is_empty() {
+            "apple".to_string()
+        } else {
+            driver
+        },
+        // NetworkInfo is shared with Docker, which calls this field `scope`.
+        // Apple's closest useful equivalent is its network mode (`nat`, etc.).
+        scope: mode,
+        containers: counts.get(&name).copied().unwrap_or(0),
+    }
+}
+
 pub fn remove_volume(name: &str) -> Result<(), String> {
-    let (_out, err, ok) = {
-        let mut c = container_cmd();
-        c.args(["volume", "delete", name]);
-        run(&mut c)
-    }?;
-    if ok {
+    let mocker = crate::runtime::mocker_cli()
+        .ok_or_else(|| "Mocker is not installed; no Mocker volumes can be removed".to_string())?;
+    let output = Command::new(mocker)
+        .args(["volume", "rm", name])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("Failed to remove Mocker volume {name}: {error}"))?;
+    if output.status.success() {
         Ok(())
     } else {
-        Err(last_error(&err))
+        Err(last_error(&String::from_utf8_lossy(&output.stderr)))
     }
 }
 
@@ -707,5 +1115,161 @@ pub fn remove_network(name: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(last_error(&err))
+    }
+}
+
+#[cfg(test)]
+mod container_group_tests {
+    use super::{
+        apple_image_from_json_for_arch, apple_network_from_json, container_from_json,
+        group_apple_containers, labels_from_mocker_inspect, mocker_volume_from_json,
+    };
+    use crate::docker::ContainerInfo;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn container(name: &str, labels: HashMap<String, String>) -> ContainerInfo {
+        ContainerInfo {
+            id: name.to_string(),
+            names: vec![name.to_string()],
+            image: "test:latest".to_string(),
+            state: "running".to_string(),
+            status: "running".to_string(),
+            ports: Vec::new(),
+            created: 0,
+            labels,
+        }
+    }
+
+    #[test]
+    fn reads_and_groups_mocker_compose_labels() {
+        let inspect = json!({
+            "Config": {
+                "Labels": {
+                    "com.mocker.compose.project": "demo",
+                    "com.mocker.compose.service": "web"
+                }
+            }
+        });
+        let labels = labels_from_mocker_inspect(&inspect);
+        let groups = group_apple_containers(vec![
+            container("demo-web-1", labels),
+            container("manual", HashMap::new()),
+        ]);
+
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "demo");
+        assert_eq!(groups[0].containers.len(), 1);
+        assert_eq!(groups[1].name, "Standalone");
+    }
+
+    #[test]
+    fn parses_nested_apple_container_list_fields() {
+        let item = json!({
+            "id": "demo-web-1",
+            "configuration": {
+                "creationDate": "2026-08-24T05:27:28Z",
+                "image": { "reference": "docker.io/library/nginx:latest" },
+                "labels": {
+                    "com.mocker.compose.project": "demo",
+                    "com.mocker.compose.service": "web"
+                },
+                "publishedPorts": [{
+                    "containerPort": 80,
+                    "hostPort": 8080,
+                    "proto": "tcp"
+                }]
+            },
+            "status": { "state": "running", "networks": [] }
+        });
+
+        let container = container_from_json(&item);
+        assert_eq!(container.id, "demo-web-1");
+        assert_eq!(container.image, "docker.io/library/nginx:latest");
+        assert_eq!(container.state, "running");
+        assert_eq!(container.status, "running");
+        assert!(container.created > 0);
+        assert_eq!(container.ports[0].public_port, Some(8080));
+        assert_eq!(container.ports[0].private_port, 80);
+        assert_eq!(
+            container.labels.get("com.mocker.compose.project"),
+            Some(&"demo".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_docker_style_image_details_from_nested_apple_json() {
+        let item = json!({
+            "id": "becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576",
+            "configuration": {
+                "creationDate": "2026-08-19T08:40:35Z",
+                "descriptor": {
+                    "digest": "sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576",
+                    "size": 1609
+                },
+                "name": "docker.io/library/redis:8-alpine"
+            },
+            "variants": [
+                {
+                    "platform": { "architecture": "amd64", "os": "linux" },
+                    "size": 42_000_000
+                },
+                {
+                    "config": { "created": "2026-08-19T08:41:00Z" },
+                    "platform": { "architecture": "arm64", "os": "linux" },
+                    "size": 38_700_000
+                }
+            ]
+        });
+
+        let image = apple_image_from_json_for_arch(&item, "arm64");
+        assert_eq!(image.id, "becdda6c7f4b");
+        assert_eq!(image.repo_tags, ["redis:8-alpine"]);
+        assert_eq!(image.size, 38_700_000);
+        assert!(image.created > 0);
+    }
+
+    #[test]
+    fn parses_mocker_volume_details() {
+        let item = json!({
+            "driver": "local",
+            "labels": { "com.example.owner": "demo" },
+            "mountpoint": "/Users/demo/.mocker/volumes/demo-data/_data",
+            "name": "demo-data"
+        });
+
+        let volume = mocker_volume_from_json(&item, "fallback");
+        assert_eq!(volume.name, "demo-data");
+        assert_eq!(volume.driver, "local");
+        assert_eq!(
+            volume.mountpoint,
+            "/Users/demo/.mocker/volumes/demo-data/_data"
+        );
+        assert_eq!(
+            volume.labels.get("com.example.owner"),
+            Some(&"demo".to_string())
+        );
+    }
+
+    #[test]
+    fn preserves_full_apple_network_id_and_nested_fields() {
+        let item = json!({
+            "configuration": {
+                "mode": "nat",
+                "name": "demo-local-machine-network",
+                "plugin": "container-network-vmnet"
+            },
+            "id": "demo-local-machine-network"
+        });
+        let counts = [("demo-local-machine-network".to_string(), 4)]
+            .into_iter()
+            .collect();
+
+        let network = apple_network_from_json(&item, &counts);
+        assert_eq!(network.id, "demo-local-machine-network");
+        assert_eq!(network.name, "demo-local-machine-network");
+        assert_eq!(network.driver, "container-network-vmnet");
+        assert_eq!(network.scope, "nat");
+        assert_eq!(network.containers, 4);
     }
 }

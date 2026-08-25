@@ -10,6 +10,7 @@ interface Props {
 }
 
 function formatSize(bytes: number): string {
+  if (bytes <= 0) return "N/A";
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024)
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -17,7 +18,13 @@ function formatSize(bytes: number): string {
 }
 
 function formatDate(ts: number): string {
+  if (ts <= 0) return "N/A";
   return new Date(ts * 1000).toLocaleDateString();
+}
+
+function formatDateTime(ts: number): string {
+  if (ts <= 0) return "N/A";
+  return new Date(ts * 1000).toLocaleString();
 }
 
 export function ImagesTab({ images, search, onRemove, onCreateContainer }: Props) {
@@ -83,7 +90,7 @@ export function ImagesTab({ images, search, onRemove, onCreateContainer }: Props
               </div>
               <div className="detail-row">
                 <span className="detail-label">Created</span>
-                <span className="detail-value">{new Date(img.created * 1000).toLocaleString()}</span>
+                <span className="detail-value">{formatDateTime(img.created)}</span>
               </div>
               {img.repo_tags.length > 0 && (
                 <div className="detail-row">

@@ -10,11 +10,17 @@ interface Props {
   onStart: (id: string) => Promise<void>;
   onStop: (id: string) => Promise<void>;
   onRestart: (id: string) => Promise<void>;
+  onStartGroup: (ids: string[]) => Promise<void>;
+  onStopGroup: (ids: string[]) => Promise<void>;
   onRemove: (id: string, force?: boolean) => Promise<void>;
   getEnv: (id: string) => Promise<string[]>;
 }
 
-export function ContainersTab({ groups, search, onStart, onStop, onRestart, onRemove, getEnv }: Props) {
+function displayContainerId(id: string) {
+  return /^[a-f0-9]{24,}$/i.test(id) ? id.slice(0, 12) : id;
+}
+
+export function ContainersTab({ groups, search, onStart, onStop, onRestart, onStartGroup, onStopGroup, onRemove, getEnv }: Props) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -42,12 +48,13 @@ export function ContainersTab({ groups, search, onStart, onStop, onRestart, onRe
     }
   };
 
-  const handleGroupAction = async (group: ContainerGroup, action: (id: string) => Promise<void>) => {
+  const handleGroupAction = async (
+    group: ContainerGroup,
+    action: (ids: string[]) => Promise<void>,
+  ) => {
     setGroupLoading(group.name);
     try {
-      for (const c of group.containers) {
-        await action(c.id);
-      }
+      await action(group.containers.map((container) => container.id));
     } finally {
       setGroupLoading(null);
     }
@@ -106,7 +113,7 @@ export function ContainersTab({ groups, search, onStart, onStop, onRestart, onRe
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {filteredGroups.map((group) => {
         const hasRunning = group.containers.some((c) => c.state === "running");
-        const allRunning = group.containers.every((c) => c.state === "running");
+        const hasStopped = group.containers.some((c) => c.state !== "running");
         return (
           <div key={group.name} className="group">
             <div
@@ -118,9 +125,8 @@ export function ContainersTab({ groups, search, onStart, onStop, onRestart, onRe
                 setMenu({
                   x: e.clientX, y: e.clientY,
                   items: [
-                    ...(allRunning ? [{ label: "Stop All", onClick: () => handleGroupAction(group, onStop) }] : []),
-                    ...(!allRunning && hasRunning ? [{ label: "Restart All", onClick: () => handleGroupAction(group, onRestart) }] : []),
-                    ...(!hasRunning ? [{ label: "Start All", onClick: () => handleGroupAction(group, onStart) }] : []),
+                    ...(group.name !== "Standalone" && hasStopped ? [{ label: "Start All", onClick: () => handleGroupAction(group, onStartGroup) }] : []),
+                    ...(group.name !== "Standalone" && hasRunning ? [{ label: "Stop All", onClick: () => handleGroupAction(group, onStopGroup) }] : []),
                     { label: "Remove All", danger: true, confirm: `Remove all containers in "${group.name}"?`, onClick: () => handleGroupRemove(group) },
                   ],
                 });
@@ -131,17 +137,14 @@ export function ContainersTab({ groups, search, onStart, onStop, onRestart, onRe
               <span className="group-count">{group.containers.length}</span>
               {group.name !== "Standalone" && (
                 <div className="group-actions" onClick={(e) => e.stopPropagation()}>
-                  {allRunning ? (
-                    <button className="action-btn stop" title="Stop All" disabled={groupLoading === group.name} onClick={() => handleGroupAction(group, onStop)}>
-                      <i className="ri-stop-fill" />
-                    </button>
-                  ) : hasRunning ? (
-                    <button className="action-btn restart" title="Restart All" disabled={groupLoading === group.name} onClick={() => handleGroupAction(group, onRestart)}>
-                      <i className="ri-restart-line" />
-                    </button>
-                  ) : (
-                    <button className="action-btn start" title="Start All" disabled={groupLoading === group.name} onClick={() => handleGroupAction(group, onStart)}>
+                  {hasStopped && (
+                    <button className="action-btn start" title="Start All" disabled={groupLoading === group.name} onClick={() => handleGroupAction(group, onStartGroup)}>
                       <i className="ri-play-fill" />
+                    </button>
+                  )}
+                  {hasRunning && (
+                    <button className="action-btn stop" title="Stop All" disabled={groupLoading === group.name} onClick={() => handleGroupAction(group, onStopGroup)}>
+                      <i className="ri-stop-fill" />
                     </button>
                   )}
                 </div>
@@ -219,7 +222,7 @@ export function ContainersTab({ groups, search, onStart, onStop, onRestart, onRe
                         <div className="container-detail">
                           <div className="detail-row">
                             <span className="detail-label">ID</span>
-                            <span className="detail-value">{c.id.slice(0, 12)}</span>
+                            <span className="detail-value">{displayContainerId(c.id)}</span>
                           </div>
                           <div className="detail-row">
                             <span className="detail-label">Image</span>

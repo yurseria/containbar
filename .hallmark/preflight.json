@@ -1,0 +1,9 @@
+{
+  "scannedAt": "2026-08-21",
+  "framework": "React 19 + Vite 8 + Tauri 2",
+  "fontStack": "SF Pro system families with SF Mono",
+  "palette": "Dark blue native-app palette with cyan signal accent",
+  "motion": "CSS-only, motion-cut",
+  "spacing": "4px-derived rem scale",
+  "preserve": ["native tray-app chrome", "dark palette", "Remix Icon set"]
+}

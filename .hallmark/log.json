@@ -1,0 +1,9 @@
+[
+  {
+    "date": "2026-08-21",
+    "macrostructure": "Workbench",
+    "theme": "Cobalt",
+    "enrichment": "none",
+    "brief": "First-run runtime setup and explicit container runtime switching"
+  }
+]

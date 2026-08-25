@@ -1,8 +1,11 @@
 use crate::provider::ProviderKind;
 use bollard::Docker;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum RuntimeKind {
@@ -20,42 +23,168 @@ pub struct RuntimeStatus {
     pub provider: ProviderKind,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderStatus {
+    pub provider: ProviderKind,
+    pub installed: bool,
+    pub running: bool,
+    pub compatible: bool,
+    pub detail: String,
+}
+
 /// Check if a non-Colima Docker socket is available (Docker Desktop, OrbStack, etc.)
 pub fn external_docker_available() -> bool {
-    // Check standard socket locations (not Colima's)
-    let standard_sockets = [
-        "/var/run/docker.sock",
-        // OrbStack
-        &format!(
-            "{}/.orbstack/run/docker.sock",
-            dirs::home_dir().unwrap_or_default().display()
-        ),
-        // Docker Desktop
-        &format!(
-            "{}/.docker/run/docker.sock",
-            dirs::home_dir().unwrap_or_default().display()
-        ),
-    ];
+    external_docker_socket().is_some()
+}
 
-    for sock in &standard_sockets {
-        if std::path::Path::new(sock).exists() {
-            // Verify it's actually working
-            let result = Command::new("docker")
-                .args(["info", "--format", "{{.ID}}"])
-                .env("DOCKER_HOST", format!("unix://{}", sock))
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-            if result {
-                return true;
-            }
+fn docker_socket_responds(socket: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::net::UnixStream;
+
+        let Ok(mut stream) = UnixStream::connect(socket) else {
+            return false;
+        };
+        let timeout = Some(Duration::from_secs(2));
+        let _ = stream.set_read_timeout(timeout);
+        let _ = stream.set_write_timeout(timeout);
+        if stream
+            .write_all(b"GET /_ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .is_err()
+        {
+            return false;
+        }
+        let mut response = String::new();
+        stream.read_to_string(&mut response).is_ok()
+            && response
+                .lines()
+                .next()
+                .is_some_and(|line| line.contains(" 200 "))
+            && response
+                .split_once("\r\n\r\n")
+                .is_some_and(|(_, body)| body.trim() == "OK")
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = socket;
+        false
+    }
+}
+
+fn docker_cli() -> Option<PathBuf> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let candidates = [
+        PathBuf::from("/opt/homebrew/bin/docker"),
+        PathBuf::from("/usr/local/bin/docker"),
+        PathBuf::from("/Applications/Docker.app/Contents/Resources/bin/docker"),
+        home.join(".orbstack/bin/docker"),
+    ];
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+pub fn docker_cli_for(provider: ProviderKind) -> PathBuf {
+    if provider == ProviderKind::Colima {
+        if let Some(path) = bundled_colima(&PathBuf::new())
+            .and_then(|colima| runtime_base_from_colima(&colima))
+            .map(|base| base.join("docker/bin/docker"))
+            .filter(|path| path.is_file())
+        {
+            return path;
         }
     }
-    false
+    docker_cli().unwrap_or_else(|| PathBuf::from("docker"))
+}
+
+fn docker_context_socket() -> Option<PathBuf> {
+    let docker = docker_cli()?;
+    let output = Command::new(docker)
+        .args([
+            "context",
+            "inspect",
+            "--format",
+            "{{.Endpoints.docker.Host}}",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let host = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    host.strip_prefix("unix://").map(PathBuf::from)
+}
+
+fn configured_docker_socket() -> Option<PathBuf> {
+    std::env::var("DOCKER_HOST")
+        .ok()
+        .and_then(|host| host.strip_prefix("unix://").map(PathBuf::from))
+        .or_else(docker_context_socket)
+}
+
+fn same_socket(left: &Path, right: &Path) -> bool {
+    left == right
+        || left
+            .canonicalize()
+            .ok()
+            .zip(right.canonicalize().ok())
+            .is_some_and(|(left, right)| left == right)
+}
+
+/// Resolve the exact external Docker endpoint. The active Docker context is
+/// considered first, followed by well-known sockets. Colima is deliberately
+/// excluded so choosing Docker can never silently target the Colima VM.
+pub fn external_docker_socket() -> Option<PathBuf> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let colima = colima_socket_path();
+    let mut candidates = Vec::new();
+
+    if let Some(path) = configured_docker_socket() {
+        candidates.push(path);
+    }
+    candidates.extend([
+        PathBuf::from("/var/run/docker.sock"),
+        home.join(".orbstack/run/docker.sock"),
+        home.join(".docker/run/docker.sock"),
+    ]);
+
+    let mut seen = HashSet::new();
+    candidates.into_iter().find(|socket| {
+        !same_socket(socket, &colima)
+            && seen.insert(socket.clone())
+            && socket.exists()
+            && docker_socket_responds(socket)
+    })
+}
+
+/// Suggest the runtime that best matches the machine's current environment.
+/// The active Docker context wins; otherwise prefer an already-running engine
+/// and finally Colima as the guided first-install default.
+pub fn suggested_provider(resource_dir: &Path) -> ProviderKind {
+    let colima = colima_socket_path();
+    if let Some(configured) =
+        configured_docker_socket().filter(|path| path.exists() && docker_socket_responds(path))
+    {
+        return if same_socket(&configured, &colima) {
+            ProviderKind::Colima
+        } else {
+            ProviderKind::Docker
+        };
+    }
+
+    if colima.exists() && docker_socket_responds(&colima) {
+        return ProviderKind::Colima;
+    }
+    if external_docker_available() {
+        return ProviderKind::Docker;
+    }
+    if provider_status(resource_dir, ProviderKind::Apple).running {
+        return ProviderKind::Apple;
+    }
+    ProviderKind::Colima
 }
 
 /// Get the path to Colima binary — bundled first, then detect from running process
-fn bundled_colima(resource_dir: &PathBuf) -> Option<PathBuf> {
+fn bundled_colima(resource_dir: &Path) -> Option<PathBuf> {
     // 1. Check bundled binary in resource dir
     let colima = resource_dir.join("runtime/colima/bin/colima");
     if colima.exists() {
@@ -98,7 +227,7 @@ fn bundled_colima(resource_dir: &PathBuf) -> Option<PathBuf> {
 
 /// Locate Homebrew even when the app was launched from Finder and inherited a
 /// minimal PATH.
-fn homebrew() -> Option<PathBuf> {
+pub(crate) fn homebrew() -> Option<PathBuf> {
     for path in &["/opt/homebrew/bin/brew", "/usr/local/bin/brew"] {
         let path = PathBuf::from(path);
         if path.exists() {
@@ -115,6 +244,101 @@ fn homebrew() -> Option<PathBuf> {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             (!path.is_empty()).then(|| PathBuf::from(path))
         })
+}
+
+/// Resolve Mocker even when Docker Tray was launched from Finder with a
+/// minimal PATH. `MOCKER_BIN` is useful for development and integration tests.
+pub(crate) fn mocker_cli() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("MOCKER_BIN") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    for path in ["/opt/homebrew/bin/mocker", "/usr/local/bin/mocker"] {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    Command::new("sh")
+        .args(["-lc", "command -v mocker"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            (!path.is_empty()).then(|| PathBuf::from(path))
+        })
+        .filter(|path| path.is_file())
+}
+
+/// Ensure the Docker-compatible Compose adapter for Apple Container exists.
+/// Mocker is installed lazily because Docker and Colima do not need it.
+pub(crate) fn ensure_mocker() -> Result<PathBuf, String> {
+    if let Some(path) = mocker_cli() {
+        return Ok(path);
+    }
+
+    let brew = homebrew().ok_or(
+        "Mocker is required for Compose on Apple Container, but Homebrew was not found. Install Homebrew, then try again.",
+    )?;
+
+    for (action, args) in [
+        ("Adding the Mocker Homebrew tap", ["tap", "us/tap"]),
+        ("Installing Mocker", ["install", "us/tap/mocker"]),
+    ] {
+        let output = Command::new(&brew)
+            .args(args)
+            .env("HOMEBREW_NO_ENV_HINTS", "1")
+            .output()
+            .map_err(|error| format!("Could not run Homebrew: {error}"))?;
+        if !output.status.success() {
+            return Err(command_error(action, &output));
+        }
+    }
+
+    if let Some(path) = mocker_cli() {
+        return Ok(path);
+    }
+
+    let prefix = Command::new(&brew)
+        .args(["--prefix", "mocker"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|prefix| !prefix.is_empty())
+        .map(PathBuf::from)
+        .map(|prefix| prefix.join("bin/mocker"))
+        .filter(|path| path.is_file());
+
+    prefix.ok_or_else(|| {
+        "Mocker was installed, but its executable could not be found. Restart the app and try again."
+            .to_string()
+    })
+}
+
+fn supported_apple_container_host() -> bool {
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return false;
+    }
+
+    Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .split('.')
+                .next()
+                .and_then(|major| major.parse::<u32>().ok())
+        })
+        .is_some_and(|major| major >= 26)
 }
 
 fn command_error(action: &str, output: &Output) -> String {
@@ -168,8 +392,31 @@ fn install_colima() -> Result<PathBuf, String> {
     })
 }
 
-fn ensure_colima(resource_dir: &PathBuf) -> Result<PathBuf, String> {
+fn ensure_colima(resource_dir: &Path) -> Result<PathBuf, String> {
     bundled_colima(resource_dir).map_or_else(install_colima, Ok)
+}
+
+pub fn ensure_apple_container() -> Result<(), String> {
+    if !supported_apple_container_host() {
+        return Err("Apple Container requires Apple Silicon and macOS 26 or later.".to_string());
+    }
+    if crate::apple::apple_container_available() {
+        return Ok(());
+    }
+
+    let brew = homebrew().ok_or(
+        "Apple Container is not installed and Homebrew was not found. Install Homebrew, then try again.",
+    )?;
+    let output = Command::new(&brew)
+        .args(["install", "container"])
+        .output()
+        .map_err(|error| format!("Could not run Homebrew: {error}"))?;
+    if !output.status.success() {
+        return Err(command_error("Installing Apple Container", &output));
+    }
+    crate::apple::apple_container_available()
+        .then_some(())
+        .ok_or_else(|| "Apple Container was installed but could not be started.".to_string())
 }
 
 /// Resolve the runtime base dir from a Colima binary path
@@ -180,21 +427,26 @@ fn runtime_base_from_colima(colima_path: &Path) -> Option<PathBuf> {
 
 /// Build environment variables for Colima, derived from the known binary path
 fn colima_env_for(colima_path: &Path) -> Vec<(String, String)> {
-    let mut env = vec![(
-        "LIMA_HOME".to_string(),
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(".lima")
-            .to_string_lossy()
-            .to_string(),
-    )];
+    let home = dirs::home_dir().unwrap_or_default();
+    let mut env = Vec::new();
+    let runtime_base = runtime_base_from_colima(colima_path).filter(|base| {
+        base.join("lima/bin/limactl").exists() && base.join("docker/bin/docker").exists()
+    });
+
+    // Historical bundled releases stored the VM directly under ~/.lima.
+    // Keep using that VM when present; a modern Homebrew-only setup otherwise
+    // retains Colima's default ~/.colima/_lima location.
+    if runtime_base.is_some() || home.join(".lima/colima").exists() {
+        env.push((
+            "LIMA_HOME".to_string(),
+            home.join(".lima").to_string_lossy().to_string(),
+        ));
+    }
 
     // A bundled Colima lives in runtime/colima/bin and has matching sibling
     // lima/docker directories. Homebrew Colima must use Homebrew's own paths;
     // setting LIMA_DIR to a guessed bundle path prevents it from starting.
-    if let Some(runtime_base) = runtime_base_from_colima(colima_path).filter(|base| {
-        base.join("lima/bin/limactl").exists() && base.join("docker/bin/docker").exists()
-    }) {
+    if let Some(runtime_base) = runtime_base {
         let lima_dir = runtime_base.join("lima");
         env.push((
             "PATH".to_string(),
@@ -219,24 +471,119 @@ fn colima_env_for(colima_path: &Path) -> Vec<(String, String)> {
     env
 }
 
+fn limactl_for(colima_path: &Path) -> Option<PathBuf> {
+    runtime_base_from_colima(colima_path)
+        .map(|base| base.join("lima/bin/limactl"))
+        .filter(|path| path.is_file())
+        .or_else(|| {
+            [
+                PathBuf::from("/opt/homebrew/bin/limactl"),
+                PathBuf::from("/usr/local/bin/limactl"),
+            ]
+            .into_iter()
+            .find(|path| path.is_file())
+        })
+}
+
+fn wait_for_colima_socket() -> bool {
+    let socket = colima_socket_path();
+    for _ in 0..40 {
+        if socket.exists() && docker_socket_responds(&socket) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    false
+}
+
 /// Detect current runtime status for the selected provider.
 ///
 /// For `Docker`/`Colima` this inspects Docker sockets; for `Apple` it checks
 /// the `container` binary and a quick readiness probe. The detection result
 /// is independent of the user's *choice* — it reports whether that provider
 /// is currently usable.
-pub fn detect_runtime(resource_dir: &PathBuf, provider: ProviderKind) -> RuntimeStatus {
+pub fn detect_runtime(resource_dir: &Path, provider: ProviderKind) -> RuntimeStatus {
     match provider {
         ProviderKind::Apple => detect_apple(),
-        // Docker and Colima share the Docker API code path; the only
-        // difference is whether an external socket is preferred. We keep
-        // detection identical to the pre-Apple behavior for both.
-        ProviderKind::Docker | ProviderKind::Colima => detect_docker(resource_dir),
+        ProviderKind::Docker => detect_external_docker(resource_dir),
+        ProviderKind::Colima => detect_colima(resource_dir),
     }
 }
 
-fn detect_docker(resource_dir: &PathBuf) -> RuntimeStatus {
-    // Check if external Docker is running (Docker Desktop, OrbStack — not Colima)
+pub fn provider_status(resource_dir: &Path, provider: ProviderKind) -> ProviderStatus {
+    match provider {
+        ProviderKind::Docker => {
+            let socket = external_docker_socket();
+            let installed = docker_cli().is_some()
+                || Path::new("/Applications/Docker.app").exists()
+                || dirs::home_dir()
+                    .unwrap_or_default()
+                    .join(".orbstack")
+                    .exists();
+            ProviderStatus {
+                provider,
+                installed,
+                running: socket.is_some(),
+                compatible: true,
+                detail: socket
+                    .map(|path| format!("Connected at {}", path.display()))
+                    .unwrap_or_else(|| {
+                        if installed {
+                            "Installed, but the Docker engine is stopped".to_string()
+                        } else {
+                            "Docker Desktop or OrbStack was not detected".to_string()
+                        }
+                    }),
+            }
+        }
+        ProviderKind::Colima => {
+            let installed = bundled_colima(resource_dir).is_some();
+            let socket = colima_socket_path();
+            let running = socket.exists() && docker_socket_responds(&socket);
+            let instance_exists = dirs::home_dir()
+                .unwrap_or_default()
+                .join(".lima/colima")
+                .exists();
+            ProviderStatus {
+                provider,
+                installed,
+                running,
+                compatible: cfg!(target_os = "macos"),
+                detail: if running {
+                    "Colima VM is running".to_string()
+                } else if instance_exists && !installed {
+                    "Existing VM found; the Colima CLI will be restored".to_string()
+                } else if installed {
+                    "Installed and ready to start".to_string()
+                } else {
+                    "Not installed; Homebrew will install Colima".to_string()
+                },
+            }
+        }
+        ProviderKind::Apple => {
+            let installed = crate::apple::apple_container_available();
+            let running = installed && crate::apple::system_running();
+            let compatible = supported_apple_container_host();
+            ProviderStatus {
+                provider,
+                installed,
+                running,
+                compatible,
+                detail: if !compatible {
+                    "Requires Apple Silicon and macOS 26 or later".to_string()
+                } else if running {
+                    "Apple Container is running".to_string()
+                } else if installed {
+                    "Installed and ready to start".to_string()
+                } else {
+                    "Not installed; Homebrew will install Apple Container".to_string()
+                },
+            }
+        }
+    }
+}
+
+fn detect_external_docker(_resource_dir: &Path) -> RuntimeStatus {
     if external_docker_available() {
         return RuntimeStatus {
             kind: RuntimeKind::External,
@@ -246,8 +593,17 @@ fn detect_docker(resource_dir: &PathBuf) -> RuntimeStatus {
         };
     }
 
-    // Check if Colima is already running via socket (works even without binary)
-    if colima_socket_path().exists() {
+    RuntimeStatus {
+        kind: RuntimeKind::None,
+        running: false,
+        message: "External Docker is not running".to_string(),
+        provider: ProviderKind::Docker,
+    }
+}
+
+fn detect_colima(resource_dir: &Path) -> RuntimeStatus {
+    let socket = colima_socket_path();
+    if socket.exists() && docker_socket_responds(&socket) {
         return RuntimeStatus {
             kind: RuntimeKind::Builtin,
             running: true,
@@ -256,8 +612,6 @@ fn detect_docker(resource_dir: &PathBuf) -> RuntimeStatus {
         };
     }
 
-    // Check if bundled Colima binary exists and can be started
-    // (socket doesn't exist at this point, so running: false)
     if bundled_colima(resource_dir).is_some() {
         return RuntimeStatus {
             kind: RuntimeKind::Builtin,
@@ -271,7 +625,7 @@ fn detect_docker(resource_dir: &PathBuf) -> RuntimeStatus {
         kind: RuntimeKind::None,
         running: false,
         message: "No Docker runtime found".to_string(),
-        provider: ProviderKind::Docker,
+        provider: ProviderKind::Colima,
     }
 }
 
@@ -286,29 +640,20 @@ fn detect_apple() -> RuntimeStatus {
         };
     }
 
-    // A quick probe: `container list` succeeds once the backend is running.
-    match std::process::Command::new("container")
-        .args(["list", "--format", "json"])
-        .output()
-    {
-        Ok(o) if o.status.success() => RuntimeStatus {
+    if crate::apple::system_running() {
+        RuntimeStatus {
             kind: RuntimeKind::Apple,
             running: true,
             message: "Apple Container is running".to_string(),
             provider: ProviderKind::Apple,
-        },
-        Ok(_) => RuntimeStatus {
+        }
+    } else {
+        RuntimeStatus {
             kind: RuntimeKind::Apple,
             running: false,
             message: "Apple Container is stopped".to_string(),
             provider: ProviderKind::Apple,
-        },
-        Err(_) => RuntimeStatus {
-            kind: RuntimeKind::Apple,
-            running: false,
-            message: "Apple Container is stopped".to_string(),
-            provider: ProviderKind::Apple,
-        },
+        }
     }
 }
 
@@ -319,32 +664,32 @@ pub fn colima_socket_path() -> PathBuf {
         .join(".colima/default/docker.sock")
 }
 
-/// Try to connect to Docker, checking Colima socket as fallback
-pub fn connect_docker() -> Option<Docker> {
-    // Only use the default socket when it was verified as a working external
-    // runtime. `connect_with_local_defaults` itself only constructs a client;
-    // it does not touch the socket, so a stale Docker Desktop symlink could
-    // otherwise win over a healthy Colima socket.
-    if external_docker_available() {
-        if let Ok(client) = Docker::connect_with_local_defaults() {
-            return Some(client);
-        }
-    }
+fn connect_socket(socket: &Path) -> Option<Docker> {
+    let url = format!("unix://{}", socket.display());
+    Docker::connect_with_unix(&url, 120, bollard::API_DEFAULT_VERSION).ok()
+}
 
-    // Prefer a running Colima runtime when no external Docker runtime was
-    // verified. This is also what makes `tauri dev` reconnect to Colima even
-    // when its development resource directory has no bundled binaries.
-    let socket = colima_socket_path();
-    if socket.exists() {
-        let url = format!("unix://{}", socket.display());
-        if let Ok(client) = Docker::connect_with_unix(&url, 120, bollard::API_DEFAULT_VERSION) {
-            return Some(client);
+/// Connect only to the runtime explicitly selected by the user.
+pub fn connect_provider(provider: ProviderKind) -> Option<Docker> {
+    match provider {
+        ProviderKind::Docker => external_docker_socket().and_then(|path| connect_socket(&path)),
+        ProviderKind::Colima => {
+            let socket = colima_socket_path();
+            (socket.exists() && docker_socket_responds(&socket))
+                .then(|| connect_socket(&socket))
+                .flatten()
         }
+        ProviderKind::Apple => None,
     }
+}
 
-    // Preserve support for a valid default socket when the Docker CLI is not
-    // installed (and therefore cannot be probed by `external_docker_available`).
-    Docker::connect_with_local_defaults().ok()
+pub fn docker_host_for(provider: ProviderKind) -> Option<String> {
+    match provider {
+        ProviderKind::Docker => external_docker_socket(),
+        ProviderKind::Colima => Some(colima_socket_path()),
+        ProviderKind::Apple => None,
+    }
+    .map(|path| format!("unix://{}", path.display()))
 }
 
 /// Extract a clean error message from Colima's verbose log output
@@ -489,17 +834,14 @@ fn write_vm_config(config: &VmConfig) {
 }
 
 /// Start the bundled Colima runtime
-pub fn start_builtin(resource_dir: &PathBuf) -> Result<String, String> {
+pub fn start_builtin(resource_dir: &Path) -> Result<String, String> {
     // Preserve the user's current Colima allocation. In particular, a
     // previously enlarged disk cannot be shrunk by Colima, so restarting with
     // the hard-coded defaults would make the runtime fail to start.
     start_builtin_with_config(resource_dir, &read_vm_config())
 }
 
-pub fn start_builtin_with_config(
-    resource_dir: &PathBuf,
-    config: &VmConfig,
-) -> Result<String, String> {
+pub fn start_builtin_with_config(resource_dir: &Path, config: &VmConfig) -> Result<String, String> {
     let colima = ensure_colima(resource_dir)?;
 
     // Update config files so existing VMs pick up the new values
@@ -511,36 +853,8 @@ pub fn start_builtin_with_config(
     let mem = config.memory.to_string();
     let disk = config.disk.to_string();
 
-    let output = Command::new(&colima)
-        .args([
-            "start",
-            "--cpu",
-            &cpu,
-            "--memory",
-            &mem,
-            "--disk",
-            &disk,
-            "--runtime",
-            "docker",
-        ])
-        .envs(env.clone())
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !output.status.success() {
-        let full = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        // If start failed, try cleaning up corrupted state and retry once
-        let _ = Command::new(&colima)
-            .args(["delete", "--force"])
-            .envs(env.clone())
-            .output();
-
-        let retry = Command::new(&colima)
+    let start = || {
+        Command::new(&colima)
             .args([
                 "start",
                 "--cpu",
@@ -552,20 +866,49 @@ pub fn start_builtin_with_config(
                 "--runtime",
                 "docker",
             ])
-            .envs(env)
+            .envs(env.clone())
             .output()
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())
+    };
 
-        if !retry.status.success() {
-            return Err(extract_error(&full));
-        }
+    let output = start()?;
+
+    if !output.status.success() {
+        return Err(command_error("Starting Colima", &output));
     }
 
-    Ok("Runtime started".to_string())
+    if wait_for_colima_socket() {
+        return Ok("Runtime started".to_string());
+    }
+
+    // A legacy Lima VM can remain alive while its forwarded Docker socket is
+    // gone. Colima reports "already running" in that state, so restart only
+    // the VM process and let Colima recreate the forwarding. Never delete the
+    // instance: its disk contains the user's containers and images.
+    let limactl = limactl_for(&colima)
+        .ok_or_else(|| "Colima is running, but its Docker socket is unavailable.".to_string())?;
+    let stop = Command::new(limactl)
+        .args(["stop", "colima"])
+        .envs(env.clone())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !stop.status.success() {
+        return Err(command_error("Repairing Colima socket forwarding", &stop));
+    }
+
+    let retry = start()?;
+    if !retry.status.success() {
+        return Err(command_error("Restarting Colima", &retry));
+    }
+    if !wait_for_colima_socket() {
+        return Err("Colima restarted, but its Docker socket did not respond.".to_string());
+    }
+
+    Ok("Runtime socket repaired".to_string())
 }
 
 /// Stop the bundled Colima runtime
-pub fn stop_builtin(resource_dir: &PathBuf) -> Result<String, String> {
+pub fn stop_builtin(resource_dir: &Path) -> Result<String, String> {
     let colima = bundled_colima(resource_dir).ok_or("Bundled Colima not found")?;
 
     let env = colima_env_for(&colima);

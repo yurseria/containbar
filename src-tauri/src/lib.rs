@@ -7,6 +7,7 @@ use tauri_plugin_autostart::ManagerExt;
 
 use docker::DockerState;
 use provider::{ProviderKind, ProviderState};
+use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -76,12 +77,6 @@ fn set_macos_accessory_app() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Select a verified external socket or the Colima socket. Constructing a
-    // Docker client does not validate a socket, so using local defaults here
-    // could otherwise leave development builds attached to a stale Docker
-    // Desktop socket while Colima is healthy.
-    let docker_client = runtime::connect_docker();
-
     let last_focus_lost = Arc::new(AtomicU64::new(0));
     let last_focus_lost_for_tray = last_focus_lost.clone();
     let browsing = Arc::new(AtomicBool::new(false));
@@ -96,7 +91,7 @@ pub fn run() {
             None,
         ))
         .manage(DockerState {
-            client: Arc::new(std::sync::Mutex::new(docker_client)),
+            client: Arc::new(std::sync::Mutex::new(None)),
         })
         .manage(BrowsingState(browsing))
         .manage(RuntimeState {
@@ -112,6 +107,8 @@ pub fn run() {
             docker::start_container,
             docker::stop_container,
             docker::restart_container,
+            docker::start_container_group,
+            docker::stop_container_group,
             docker::get_container_logs,
             docker::docker_ping,
             docker::remove_container,
@@ -121,6 +118,8 @@ pub fn run() {
             docker::pull_image,
             docker::create_container,
             docker::compose_up,
+            docker::inspect_compose_conflicts,
+            docker::stop_conflicting_compose_projects,
             docker::get_container_logs_since,
             docker::get_container_env,
             docker::get_container_mounts,
@@ -132,10 +131,11 @@ pub fn run() {
             docker::save_from_container,
             docker::import_to_container,
             runtime_status,
+            runtime_overview,
+            switch_provider,
             runtime_start,
             runtime_stop,
             get_provider,
-            set_provider,
             get_vm_config,
             apply_vm_config,
             get_autostart,
@@ -155,6 +155,11 @@ pub fn run() {
             // Load the persisted provider selection into the in-memory cache.
             let provider = provider::load_provider(app.handle());
             app.state::<ProviderState>().set(provider);
+            if provider != ProviderKind::Apple {
+                if let Ok(mut guard) = app.state::<DockerState>().client.lock() {
+                    *guard = runtime::connect_provider(provider);
+                }
+            }
 
             let icon = app
                 .path()
@@ -265,27 +270,24 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(target_os = "macos")]
                 setup_macos_window(&window);
-                let _ = window.hide();
+                if provider::setup_complete(app.handle()) {
+                    let _ = window.hide();
+                } else {
+                    let _ = window.center();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             }
 
-            // Auto-start the selected provider's runtime if it isn't already
-            // available. Docker/Colima share the Docker API path; Apple uses
-            // the native `container` CLI.
+            // Existing users keep automatic startup for app-managed runtimes.
+            // A first run stays idle so the setup wizard can explain and ask
+            // before installing anything.
             let provider = app.state::<ProviderState>().get();
-            let needs_start = match provider {
-                ProviderKind::Apple => {
-                    // Only auto-start if the container backend isn't already
-                    // answering `container list`.
-                    let status = runtime::detect_runtime(
-                        &app.path().resource_dir().unwrap_or_default(),
-                        provider,
-                    );
-                    !status.running
-                }
-                ProviderKind::Docker | ProviderKind::Colima => {
-                    !runtime::external_docker_available() && !runtime::colima_socket_path().exists()
-                }
-            };
+            let status =
+                runtime::detect_runtime(&app.path().resource_dir().unwrap_or_default(), provider);
+            let needs_start = provider::setup_complete(app.handle())
+                && provider != ProviderKind::Docker
+                && !status.running;
 
             if needs_start {
                 let resource_dir = app.path().resource_dir().unwrap_or_default();
@@ -300,54 +302,18 @@ pub fn run() {
                         let _ = tray.set_tooltip(Some("Docker Tray — Starting runtime..."));
                     }
                     std::thread::spawn(move || {
-                        let success = match provider {
-                            ProviderKind::Apple => match apple::system_start() {
-                                Ok(_) => true,
-                                Err(e) => {
-                                    if let Ok(mut guard) = error.lock() {
-                                        *guard = Some(e);
-                                    }
-                                    false
+                        let success = match prepare_provider(&resource_dir, provider) {
+                            Ok(client) => {
+                                if let Ok(mut guard) = docker_client.lock() {
+                                    *guard = client;
                                 }
-                            },
-                            ProviderKind::Docker | ProviderKind::Colima => {
-                                // A running Colima socket may outlive the app
-                                // bundle used to launch `tauri dev`. Reuse a
-                                // healthy daemon before trying to locate and
-                                // start bundled binaries.
-                                let existing = runtime::connect_docker().and_then(|client| {
-                                    tauri::async_runtime::block_on(client.ping())
-                                        .ok()
-                                        .map(|_| client)
-                                });
-
-                                if let Some(client) = existing {
-                                    if let Ok(mut guard) = docker_client.lock() {
-                                        *guard = Some(client);
-                                    }
-                                    true
-                                } else {
-                                    match runtime::start_builtin(&resource_dir) {
-                                        Ok(_) => {
-                                            std::thread::sleep(std::time::Duration::from_secs(2));
-                                            match runtime::connect_docker() {
-                                                Some(client) => {
-                                                    if let Ok(mut guard) = docker_client.lock() {
-                                                        *guard = Some(client);
-                                                    }
-                                                    true
-                                                }
-                                                None => false,
-                                            }
-                                        }
-                                        Err(e) => {
-                                            if let Ok(mut guard) = error.lock() {
-                                                *guard = Some(e);
-                                            }
-                                            false
-                                        }
-                                    }
+                                true
+                            }
+                            Err(message) => {
+                                if let Ok(mut guard) = error.lock() {
+                                    *guard = Some(message);
                                 }
+                                false
                             }
                         };
                         starting.store(false, Ordering::SeqCst);
@@ -459,46 +425,56 @@ fn get_home_dir() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn pick_file_for_import(
+async fn pick_file_for_import(
     app: tauri::AppHandle,
     state: tauri::State<'_, BrowsingState>,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    state.0.store(true, Ordering::SeqCst);
-    let result = app
-        .dialog()
-        .file()
-        .blocking_pick_file()
-        .and_then(|f| f.into_path().ok())
-        .map(|p| p.to_string_lossy().to_string());
     let flag = state.0.clone();
+    flag.store(true, Ordering::SeqCst);
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_file(move |file| {
+        let path = file
+            .and_then(|file| file.into_path().ok())
+            .map(|path| path.to_string_lossy().to_string());
+        let _ = sender.send(path);
+    });
+    let result = receiver
+        .await
+        .map_err(|_| "File picker closed unexpectedly".to_string());
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(500));
         flag.store(false, Ordering::SeqCst);
     });
-    Ok(result)
+    result
 }
 
 #[tauri::command]
-fn pick_yaml_file(
+async fn pick_yaml_file(
     app: tauri::AppHandle,
     state: tauri::State<'_, BrowsingState>,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    state.0.store(true, Ordering::SeqCst);
-    let result = app
-        .dialog()
+    let flag = state.0.clone();
+    flag.store(true, Ordering::SeqCst);
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
         .file()
         .add_filter("Docker Compose", &["yaml", "yml"])
-        .blocking_pick_file()
-        .and_then(|f| f.into_path().ok())
-        .map(|p| p.to_string_lossy().to_string());
-    let flag = state.0.clone();
+        .pick_file(move |file| {
+            let path = file
+                .and_then(|file| file.into_path().ok())
+                .map(|path| path.to_string_lossy().to_string());
+            let _ = sender.send(path);
+        });
+    let result = receiver
+        .await
+        .map_err(|_| "File picker closed unexpectedly".to_string());
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(500));
         flag.store(false, Ordering::SeqCst);
     });
-    Ok(result)
+    result
 }
 
 // --- Runtime management ---
@@ -508,6 +484,116 @@ use std::sync::Mutex;
 struct RuntimeState {
     starting: Arc<AtomicBool>,
     error: Arc<Mutex<Option<String>>>,
+}
+
+#[derive(Serialize)]
+struct RuntimeOverview {
+    setup_complete: bool,
+    selected: ProviderKind,
+    recommended: ProviderKind,
+    providers: Vec<runtime::ProviderStatus>,
+}
+
+fn build_runtime_overview(app: &tauri::AppHandle, selected: ProviderKind) -> RuntimeOverview {
+    let resource_dir = app.path().resource_dir().unwrap_or_default();
+    let setup_complete = provider::setup_complete(app);
+    RuntimeOverview {
+        setup_complete,
+        selected,
+        recommended: if setup_complete {
+            selected
+        } else {
+            runtime::suggested_provider(&resource_dir)
+        },
+        providers: [
+            ProviderKind::Docker,
+            ProviderKind::Colima,
+            ProviderKind::Apple,
+        ]
+        .into_iter()
+        .map(|provider| runtime::provider_status(&resource_dir, provider))
+        .collect(),
+    }
+}
+
+fn prepare_provider(
+    resource_dir: &std::path::Path,
+    provider: ProviderKind,
+) -> Result<Option<bollard::Docker>, String> {
+    match provider {
+        ProviderKind::Docker => runtime::connect_provider(provider)
+            .map(Some)
+            .ok_or_else(|| {
+                "Docker Desktop or OrbStack is not running. Start it, then try again.".to_string()
+            }),
+        ProviderKind::Colima => {
+            if runtime::connect_provider(provider).is_none() {
+                runtime::start_builtin(resource_dir)?;
+            }
+            runtime::connect_provider(provider)
+                .map(Some)
+                .ok_or_else(|| "Colima started, but its Docker socket did not respond.".to_string())
+        }
+        ProviderKind::Apple => {
+            runtime::ensure_apple_container()?;
+            apple::system_start()?;
+            apple::list_containers()?;
+            Ok(None)
+        }
+    }
+}
+
+#[tauri::command]
+fn runtime_overview(
+    app: tauri::AppHandle,
+    provider_state: tauri::State<'_, ProviderState>,
+) -> RuntimeOverview {
+    build_runtime_overview(&app, provider_state.get())
+}
+
+#[tauri::command]
+async fn switch_provider(
+    app: tauri::AppHandle,
+    provider: ProviderKind,
+    provider_state: tauri::State<'_, ProviderState>,
+    docker: tauri::State<'_, DockerState>,
+    runtime_state: tauri::State<'_, RuntimeState>,
+) -> Result<RuntimeOverview, String> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?;
+    if runtime_state.starting.swap(true, Ordering::SeqCst) {
+        return Err("Another runtime operation is already in progress.".to_string());
+    }
+
+    if let Ok(mut guard) = runtime_state.error.lock() {
+        *guard = None;
+    }
+    let resource_for_task = resource_dir.clone();
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        prepare_provider(&resource_for_task, provider)
+    })
+    .await;
+
+    runtime_state.starting.store(false, Ordering::SeqCst);
+    let result = joined.map_err(|error| error.to_string())?;
+    match result {
+        Ok(client) => {
+            provider::store_provider(&app, provider)?;
+            provider_state.set(provider);
+            if let Ok(mut guard) = docker.client.lock() {
+                *guard = client;
+            }
+            Ok(build_runtime_overview(&app, provider))
+        }
+        Err(error) => {
+            if let Ok(mut guard) = runtime_state.error.lock() {
+                *guard = Some(error.clone());
+            }
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -563,11 +649,8 @@ fn runtime_start(
 
     let provider = provider_state.get();
 
-    // Switching between Docker and Colima does not require a VM restart when
-    // Colima is already healthy. Reconnect before looking for a bundled
-    // runtime; development builds intentionally do not carry those binaries.
-    if matches!(provider, ProviderKind::Docker | ProviderKind::Colima) {
-        if let Some(client) = runtime::connect_docker().and_then(|client| {
+    if provider != ProviderKind::Apple {
+        if let Some(client) = runtime::connect_provider(provider).and_then(|client| {
             tauri::async_runtime::block_on(client.ping())
                 .ok()
                 .map(|_| client)
@@ -599,47 +682,18 @@ fn runtime_start(
 
     // Run in background thread — returns immediately
     std::thread::spawn(move || {
-        let success = match provider {
-            ProviderKind::Apple => match apple::system_start() {
-                Ok(_) => true,
-                Err(e) => {
-                    if let Ok(mut guard) = error.lock() {
-                        *guard = Some(e);
-                    }
-                    false
+        let success = match prepare_provider(&resource_dir, provider) {
+            Ok(client) => {
+                if let Ok(mut guard) = docker_client.lock() {
+                    *guard = client;
                 }
-            },
-            ProviderKind::Docker | ProviderKind::Colima => {
-                match runtime::start_builtin(&resource_dir) {
-                    Ok(_) => {
-                        // Wait a moment for socket to appear
-                        std::thread::sleep(std::time::Duration::from_secs(2));
-                        // Reconnect Docker client
-                        match runtime::connect_docker() {
-                            Some(client) => {
-                                if let Ok(mut guard) = docker_client.lock() {
-                                    *guard = Some(client);
-                                }
-                                true
-                            }
-                            None => {
-                                if let Ok(mut guard) = error.lock() {
-                                    *guard = Some(
-                                        "Runtime started but Docker connection failed. Try again."
-                                            .to_string(),
-                                    );
-                                }
-                                false
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        if let Ok(mut guard) = error.lock() {
-                            *guard = Some(e);
-                        }
-                        false
-                    }
+                true
+            }
+            Err(message) => {
+                if let Ok(mut guard) = error.lock() {
+                    *guard = Some(message);
                 }
+                false
             }
         };
         starting.store(false, Ordering::SeqCst);
@@ -676,7 +730,8 @@ fn runtime_stop(
             // it running (it is lightweight). Report success.
             Ok("Apple Container backend left running".to_string())
         }
-        ProviderKind::Docker | ProviderKind::Colima => {
+        ProviderKind::Docker => Ok("External Docker runtime left running".to_string()),
+        ProviderKind::Colima => {
             let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
             runtime::stop_builtin(&resource_dir)
         }
@@ -688,31 +743,6 @@ fn runtime_stop(
 #[tauri::command]
 fn get_provider(provider_state: tauri::State<'_, ProviderState>) -> ProviderKind {
     provider_state.get()
-}
-
-#[tauri::command]
-fn set_provider(
-    app: tauri::AppHandle,
-    provider_state: tauri::State<'_, ProviderState>,
-    docker: tauri::State<'_, DockerState>,
-    provider: ProviderKind,
-) -> Result<(), String> {
-    // Persist and cache the new selection.
-    provider::store_provider(&app, provider)?;
-    provider_state.set(provider);
-
-    // Apple has no Docker API client. Docker and Colima can share an already
-    // running daemon, so reconnect immediately instead of leaving the UI
-    // disconnected until the application is restarted.
-    let next_client = match provider {
-        ProviderKind::Apple => None,
-        ProviderKind::Docker | ProviderKind::Colima => runtime::connect_docker(),
-    };
-    if let Ok(mut guard) = docker.client.lock() {
-        *guard = next_client;
-    }
-
-    Ok(())
 }
 
 #[tauri::command]
@@ -756,7 +786,7 @@ fn apply_vm_config(
         let success = match runtime::start_builtin_with_config(&resource_dir, &config) {
             Ok(_) => {
                 std::thread::sleep(std::time::Duration::from_secs(2));
-                match runtime::connect_docker() {
+                match runtime::connect_provider(ProviderKind::Colima) {
                     Some(client) => {
                         if let Ok(mut guard) = docker_client.lock() {
                             *guard = Some(client);
