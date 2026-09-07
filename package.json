@@ -17,7 +17,8 @@
     "@tauri-apps/plugin-opener": "^2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "remixicon": "^4.9.1"
+    "remixicon": "^4.9.1",
+    "tauri-plugin-liquid-glass-api": "^0.1.6"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

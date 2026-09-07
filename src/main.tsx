@@ -4,11 +4,22 @@ import App from "./App";
 import { LogWindow } from "./components/LogWindow";
 import { FileExplorer } from "./components/FileExplorer";
 import { applyScale, getSettings } from "./components/Settings";
+import { applyAppTheme, applyThemeClass, installNativeGlassRegionSync } from "./theme";
 import "remixicon/fonts/remixicon.css";
 import "./App.css";
 
-// Apply saved UI scale on startup
-applyScale(getSettings().uiScale);
+const initialSettings = getSettings();
+const isAuxiliaryWindow = /^#\/(logs|files)\//.test(window.location.hash);
+
+// Auxiliary windows stay on the opaque utility theme for log/file readability.
+applyScale(initialSettings.uiScale);
+applyThemeClass(isAuxiliaryWindow ? "cobalt" : initialSettings.theme);
+if (!isAuxiliaryWindow) {
+  void applyAppTheme(initialSettings.theme).catch((error) => {
+    console.error("Failed to restore app theme:", error);
+    applyThemeClass("cobalt");
+  });
+}
 
 function Router() {
   const hash = window.location.hash;
@@ -30,3 +41,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <Router />
   </React.StrictMode>,
 );
+
+if (!isAuxiliaryWindow) {
+  installNativeGlassRegionSync();
+}

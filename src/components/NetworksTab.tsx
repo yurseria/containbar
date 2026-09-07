@@ -28,7 +28,7 @@ export function NetworksTab({ networks, search, onRemove }: Props) {
       {filtered.map((n) => (
         <div
           key={n.id}
-          className={`list-item clickable ${expanded === n.id ? "expanded" : ""}`}
+          className={`list-item glass-surface clickable ${expanded === n.id ? "expanded" : ""}`}
           onClick={() => setExpanded(expanded === n.id ? null : n.id)}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -48,7 +48,7 @@ export function NetworksTab({ networks, search, onRemove }: Props) {
             </div>
             <div className="item-badges">
               {n.containers > 0 && (
-                <span className="count-badge">
+                <span className="size-badge">
                   {n.containers} container{n.containers !== 1 ? "s" : ""}
                 </span>
               )}

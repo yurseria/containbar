@@ -1,5 +1,23 @@
 [
   {
+    "date": "2026-08-29",
+    "macrostructure": "Workbench",
+    "theme": "studied-DNA",
+    "theme_axes": "adaptive / system-sans / cool",
+    "vibe": "native grouped liquid glass",
+    "enrichment": "NSGlassEffectContainerView region bridge",
+    "brief": "Docker Tray per-control native Liquid Glass"
+  },
+  {
+    "date": "2026-08-28",
+    "macrostructure": "Bento Grid",
+    "theme": "custom",
+    "theme_axes": "light / geometric-sans / cool",
+    "vibe": "soft atmospheric liquid glass",
+    "enrichment": "native NSGlassEffectView with vibrancy fallback",
+    "brief": "Docker Tray optional native Liquid Glass theme"
+  },
+  {
     "date": "2026-08-21",
     "macrostructure": "Workbench",
     "theme": "Cobalt",

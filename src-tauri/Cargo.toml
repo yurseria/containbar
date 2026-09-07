@@ -9,6 +9,9 @@ edition = "2021"
 name = "docker_tray_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+cargo-clippy = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -27,8 +30,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-dialog = "2"
+tauri-plugin-liquid-glass = "0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.26"
+objc = "0.2"
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSColor", "NSResponder", "NSView", "NSVisualEffectView"] }

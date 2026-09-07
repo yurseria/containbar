@@ -28,7 +28,7 @@ export function VolumesTab({ volumes, search, onRemove }: Props) {
       {filtered.map((v) => (
         <div
           key={v.name}
-          className={`list-item clickable ${expanded === v.name ? "expanded" : ""}`}
+          className={`list-item glass-surface clickable ${expanded === v.name ? "expanded" : ""}`}
           onClick={() => setExpanded(expanded === v.name ? null : v.name)}
           onContextMenu={(e) => {
             e.preventDefault();

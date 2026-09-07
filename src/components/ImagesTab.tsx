@@ -27,15 +27,24 @@ function formatDateTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString();
 }
 
+function imageDisplayName(image: ImageInfo): string {
+  return image.repo_tags[0] || image.id;
+}
+
 export function ImagesTab({ images, search, onRemove, onCreateContainer }: Props) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
-  const filtered = images.filter((img) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return img.repo_tags.some((t) => t.toLowerCase().includes(q)) || img.id.toLowerCase().includes(q);
-  });
+  const filtered = images
+    .filter((img) => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return img.repo_tags.some((t) => t.toLowerCase().includes(q)) || img.id.toLowerCase().includes(q);
+    })
+    .sort((a, b) => imageDisplayName(a).localeCompare(imageDisplayName(b), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }));
 
   if (filtered.length === 0) {
     return <div className="empty">{search ? "No matching images" : "No images found"}</div>;
@@ -47,7 +56,7 @@ export function ImagesTab({ images, search, onRemove, onCreateContainer }: Props
       {filtered.map((img) => (
         <div
           key={img.id}
-          className={`list-item clickable ${expanded === img.id ? "expanded" : ""}`}
+          className={`list-item glass-surface clickable ${expanded === img.id ? "expanded" : ""}`}
           onClick={() => setExpanded(expanded === img.id ? null : img.id)}
           onContextMenu={(e) => {
             e.preventDefault();

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Provider, RuntimeOverview } from "../types";
 import { providerCapabilities } from "../types";
+import { applyAppTheme, type AppTheme } from "../theme";
 import { RuntimePicker } from "./RuntimeSetup";
 
 interface SettingsData {
@@ -10,6 +11,7 @@ interface SettingsData {
   shell: string;
   refreshInterval: number;
   uiScale: number;
+  theme: AppTheme;
   /** Active runtime provider (kept in sync with the backend `provider.json`). */
   provider: Provider;
 }
@@ -20,6 +22,7 @@ const DEFAULTS: SettingsData = {
   shell: "/bin/sh",
   refreshInterval: 5,
   uiScale: 1.0,
+  theme: "cobalt",
   provider: "docker",
 };
 
@@ -65,6 +68,7 @@ interface UpdateInfo {
 }
 
 type UpdateStatus = "idle" | "checking" | "up-to-date" | "update-available" | "error";
+type ThemeStatus = "idle" | "loading" | "success" | "error";
 
 export function Settings({
   onClose,
@@ -83,6 +87,17 @@ export function Settings({
   const [appVersion, setAppVersion] = useState("");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [themeStatus, setThemeStatus] = useState<ThemeStatus>("idle");
+  const [themeTarget, setThemeTarget] = useState<AppTheme | null>(null);
+
+  useEffect(() => {
+    if (themeStatus !== "success" && themeStatus !== "error") return;
+    const timeout = window.setTimeout(() => {
+      setThemeStatus("idle");
+      setThemeTarget(null);
+    }, themeStatus === "success" ? 900 : 1800);
+    return () => window.clearTimeout(timeout);
+  }, [themeStatus]);
 
   const handleCheckUpdate = async () => {
     setUpdateStatus("checking");
@@ -149,6 +164,23 @@ export function Settings({
 
   const caps = providerCapabilities(settings.provider);
 
+  const changeTheme = async (theme: AppTheme) => {
+    if (themeStatus === "loading" || theme === settings.theme) return;
+    const previous = settings.theme;
+    update({ theme });
+    setThemeTarget(theme);
+    setThemeStatus("loading");
+    try {
+      await applyAppTheme(theme);
+      setThemeStatus("success");
+    } catch (error) {
+      console.error("Failed to apply app theme:", error);
+      update({ theme: previous });
+      await applyAppTheme(previous).catch(() => {});
+      setThemeStatus("error");
+    }
+  };
+
   const update = (partial: Partial<SettingsData>) => {
     setSettings((prev) => {
       const next = { ...prev, ...partial };
@@ -170,7 +202,7 @@ export function Settings({
       </div>
 
       <div className="settings-content">
-        <div className="settings-group">
+        <div className="settings-group settings-runtime">
           <label className="settings-label">Runtime</label>
           {runtimeOverview ? (
             <RuntimePicker
@@ -183,6 +215,40 @@ export function Settings({
           ) : (
             <span className="settings-hint">Checking installed runtimes…</span>
           )}
+        </div>
+
+        <div className="settings-group">
+          <label className="settings-label">Appearance</label>
+          <div className="theme-options" role="group" aria-label="App theme">
+            {[
+              { value: "cobalt" as const, label: "Cobalt", icon: "ri-moon-clear-line" },
+              { value: "liquid-glass" as const, label: "Liquid Glass", icon: "ri-water-flash-line" },
+            ].map((option) => {
+              const active = settings.theme === option.value;
+              const state = themeTarget === option.value && themeStatus !== "idle" ? themeStatus : undefined;
+              return (
+                <button
+                  key={option.value}
+                  className={`theme-option ${active ? "active" : ""}`}
+                  type="button"
+                  aria-pressed={active}
+                  data-state={state}
+                  disabled={themeStatus === "loading"}
+                  onClick={() => changeTheme(option.value)}
+                >
+                  <i className={state === "loading" ? "ri-loader-4-line" : option.icon} aria-hidden="true" />
+                  <span>{option.label}</span>
+                  {state === "success" && <i className="ri-check-line theme-option-state" aria-hidden="true" />}
+                  {state === "error" && <i className="ri-error-warning-line theme-option-state" aria-hidden="true" />}
+                </button>
+              );
+            })}
+          </div>
+          <span className={`settings-hint ${themeStatus === "error" ? "theme-hint--error" : ""}`}>
+            {themeStatus === "error"
+              ? "Liquid Glass could not be applied. Cobalt was restored."
+              : "Liquid Glass uses the native macOS material and falls back to vibrancy on older systems."}
+          </span>
         </div>
 
         <div className="settings-group">

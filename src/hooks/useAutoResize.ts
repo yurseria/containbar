@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { PhysicalSize } from "@tauri-apps/api/dpi";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 
 const BASE_WIDTH = 420;
 const MIN_HEIGHT = 300;
@@ -30,21 +30,30 @@ export function useAutoResize(ref: React.RefObject<HTMLElement | null>) {
         natural += child.scrollHeight;
       }
 
-      const clamped = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, natural + 10));
+      // The Liquid Glass canvas reserves transparent space around its panes.
+      // Include that space (and the flex gap) so the native window does not
+      // stop growing before the content has reached the same usable height as
+      // the Cobalt theme.
+      const styles = getComputedStyle(el);
+      const paddingY = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+      const rowGap = parseFloat(styles.rowGap) || 0;
+      const gaps = Math.max(0, el.children.length - 1) * rowGap;
+      natural += paddingY + gaps;
+
+      const isLiquidGlass = document.documentElement.dataset.theme === "liquid-glass";
+      const clamped = isLiquidGlass
+        ? MAX_HEIGHT
+        : Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, natural + 10));
 
       const heightChanged = Math.abs(clamped - lastHeight.current) > 2;
       const widthChanged = width !== lastWidth.current;
       if (!heightChanged && !widthChanged) return;
-      lastHeight.current = clamped;
-      lastWidth.current = width;
 
       try {
         const win = getCurrentWebviewWindow();
-        const scale = await win.scaleFactor();
-        await win.setSize(new PhysicalSize(
-          Math.round(width * scale),
-          Math.round(clamped * scale),
-        ));
+        await win.setSize(new LogicalSize(width, clamped));
+        lastHeight.current = clamped;
+        lastWidth.current = width;
       } catch {
         // ignore — window may not be ready
       }
@@ -58,11 +67,21 @@ export function useAutoResize(ref: React.RefObject<HTMLElement | null>) {
     const mutObserver = new MutationObserver(() => update());
     mutObserver.observe(el, { childList: true, subtree: true });
 
+    // Theme is applied to <html>, outside the observed app subtree. Without
+    // this observer, switching to Liquid Glass could leave the window at the
+    // height calculated for Cobalt until some unrelated content changed.
+    const themeObserver = new MutationObserver(() => update());
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
     update();
 
     return () => {
       observer.disconnect();
       mutObserver.disconnect();
+      themeObserver.disconnect();
     };
   }, [ref]);
 }

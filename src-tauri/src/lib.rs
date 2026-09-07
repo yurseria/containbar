@@ -1,5 +1,6 @@
 mod apple;
 mod docker;
+mod liquid_glass_regions;
 mod provider;
 mod runtime;
 
@@ -63,6 +64,40 @@ fn setup_macos_window(window: &tauri::WebviewWindow) {
         }
     }
 }
+
+#[cfg(target_os = "macos")]
+fn set_macos_webview_window_alpha(window: &tauri::WebviewWindow, alpha: f64) {
+    use objc2_app_kit::NSWindow;
+
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
+    let ns_window = ns_window as usize;
+    let _ = window.run_on_main_thread(move || {
+        let ns_window: &NSWindow = unsafe { &*(ns_window as *const NSWindow) };
+        ns_window.setAlphaValue(alpha);
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_macos_webview_window_alpha(_window: &tauri::WebviewWindow, _alpha: f64) {}
+
+#[cfg(target_os = "macos")]
+fn set_macos_window_alpha(window: &tauri::Window, alpha: f64) {
+    use objc2_app_kit::NSWindow;
+
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
+    let ns_window = ns_window as usize;
+    let _ = window.run_on_main_thread(move || {
+        let ns_window: &NSWindow = unsafe { &*(ns_window as *const NSWindow) };
+        ns_window.setAlphaValue(alpha);
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_macos_window_alpha(_window: &tauri::Window, _alpha: f64) {}
 
 #[derive(Clone, Copy)]
 struct LogicalRect {
@@ -273,6 +308,7 @@ pub fn run() {
     let browsing_for_event = browsing.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_liquid_glass::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -284,6 +320,7 @@ pub fn run() {
             client: Arc::new(std::sync::Mutex::new(None)),
         })
         .manage(BrowsingState(browsing))
+        .manage(liquid_glass_regions::RegionGlassState::default())
         .manage(RuntimeState {
             starting: Arc::new(AtomicBool::new(false)),
             error: Arc::new(Mutex::new(None)),
@@ -337,6 +374,7 @@ pub fn run() {
             get_home_dir,
             pick_file_for_import,
             pick_yaml_file,
+            liquid_glass_regions::set_liquid_glass_regions,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -439,6 +477,7 @@ pub fn run() {
                                     ns_app.activateIgnoringOtherApps(true);
                                 }
                             }
+                            set_macos_webview_window_alpha(&window, 1.0);
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
@@ -541,8 +580,20 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(move |window, event| {
-            if let tauri::WindowEvent::Focused(false) = event {
-                if window.label() == "main" {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Focused(focused) = event {
+                    if *focused {
+                        set_macos_window_alpha(window, 1.0);
+                        return;
+                    }
+
+                    if browsing_for_event.load(Ordering::SeqCst) {
+                        return;
+                    }
+
+                    // Remove the window from the current frame before AppKit
+                    // redraws native glass with its darker inactive material.
+                    set_macos_window_alpha(window, 0.0);
                     let w = window.clone();
                     let ts = last_focus_lost.clone();
                     let br = browsing_for_event.clone();
@@ -551,6 +602,11 @@ pub fn run() {
                         std::thread::sleep(std::time::Duration::from_millis(150));
                         // Skip hide if file picker is open
                         if br.load(Ordering::SeqCst) {
+                            set_macos_window_alpha(&w, 1.0);
+                            return;
+                        }
+                        if w.is_focused().unwrap_or(false) {
+                            set_macos_window_alpha(&w, 1.0);
                             return;
                         }
                         let clicked_at = ts.load(Ordering::SeqCst);

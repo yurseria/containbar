@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>Docker Tray · Liquid Glass Theme Concept</title>
+    <link rel="stylesheet" href="../node_modules/remixicon/fonts/remixicon.css" />
+    <link rel="stylesheet" href="./liquid-glass-preview.css" />
+  </head>
+  <body>
+    <svg class="liquid-defs" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="liquid-refraction" x="-18%" y="-18%" width="136%" height="136%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008 0.016" numOctaves="2" seed="11" result="noise" />
+          <feGaussianBlur in="noise" stdDeviation="1.4" result="soft-noise" />
+          <feDisplacementMap in="SourceGraphic" in2="soft-noise" scale="18" xChannelSelector="R" yChannelSelector="B" />
+        </filter>
+        <filter id="liquid-refraction-soft" x="-14%" y="-14%" width="128%" height="128%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.022" numOctaves="1" seed="19" result="noise" />
+          <feGaussianBlur in="noise" stdDeviation="1.1" result="soft-noise" />
+          <feDisplacementMap in="SourceGraphic" in2="soft-noise" scale="11" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+        <filter id="liquid-refraction-strong" x="-24%" y="-24%" width="148%" height="148%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.006 0.014" numOctaves="2" seed="27" result="noise" />
+          <feGaussianBlur in="noise" stdDeviation="1.8" result="soft-noise" />
+          <feDisplacementMap in="SourceGraphic" in2="soft-noise" scale="28" xChannelSelector="B" yChannelSelector="R" />
+        </filter>
+      </defs>
+    </svg>
+    <div class="material-backdrop" aria-hidden="true">
+      <div class="backdrop-poster backdrop-poster--warm">
+        <span class="backdrop-poster__label">Compose<br />stack</span>
+        <span class="backdrop-poster__code">web · api · db</span>
+      </div>
+      <div class="backdrop-poster backdrop-poster--dark">
+        <span class="backdrop-poster__label">Live<br />logs</span>
+        <span class="backdrop-poster__code">GET /health 200<br />worker ready</span>
+      </div>
+      <div class="backdrop-poster backdrop-poster--cool">
+        <span class="backdrop-poster__label">Local<br />runtime</span>
+        <span class="backdrop-poster__code">colima · arm64</span>
+      </div>
+    </div>
+    <main class="preview-shell" aria-label="Docker Tray liquid glass theme concept">
+      <section class="tray-app" aria-label="Docker Tray">
+        <span class="liquid-caustic" aria-hidden="true"></span>
+        <header class="titlebar reveal" style="--i: 0">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"><i class="ri-instance-line"></i></span>
+            <span class="brand-copy">
+              <span class="brand-name">Docker Tray</span>
+              <span class="brand-runtime"><span class="live-dot"></span>Colima running</span>
+            </span>
+          </div>
+          <button class="icon-button" type="button" aria-label="Pull image" title="Pull image"><i class="ri-download-line"></i></button>
+          <button class="icon-button" type="button" aria-label="Create container" title="Create container"><i class="ri-add-line"></i></button>
+          <button class="icon-button" type="button" aria-label="Open settings" title="Open settings"><i class="ri-settings-3-line"></i></button>
+        </header>
+
+        <div class="dashboard">
+          <section class="status-deck reveal" style="--i: 1" aria-label="Runtime status">
+            <div class="glass-tile health-card">
+              <div class="health-ring" aria-label="All sample containers are running"><span><i class="ri-check-line" aria-hidden="true"></i></span></div>
+              <div>
+                <span class="health-title">Everything is running</span>
+                <span class="health-note">5 of 5 containers healthy</span>
+              </div>
+            </div>
+            <div class="glass-tile metric-card">
+              <span class="metric-value">—</span>
+              <span class="metric-label">CPU live</span>
+            </div>
+            <div class="glass-tile metric-card">
+              <span class="metric-value">—</span>
+              <span class="metric-label">Memory live</span>
+            </div>
+          </section>
+
+          <nav class="resource-nav reveal" style="--i: 2" role="tablist" aria-label="Docker resources" data-active="0">
+            <span class="tab-lens" aria-hidden="true"></span>
+            <button class="resource-tab" type="button" role="tab" aria-selected="true" data-tab="containers">
+              <i class="ri-instance-line" aria-hidden="true"></i><span>Containers</span><span class="resource-count">5</span>
+            </button>
+            <button class="resource-tab" type="button" role="tab" aria-selected="false" data-tab="images">
+              <i class="ri-stack-line" aria-hidden="true"></i><span>Images</span><span class="resource-count">—</span>
+            </button>
+            <button class="resource-tab" type="button" role="tab" aria-selected="false" data-tab="volumes">
+              <i class="ri-hard-drive-3-line" aria-hidden="true"></i><span>Volumes</span><span class="resource-count">—</span>
+            </button>
+            <button class="resource-tab" type="button" role="tab" aria-selected="false" data-tab="networks">
+              <i class="ri-share-line" aria-hidden="true"></i><span>Networks</span><span class="resource-count">—</span>
+            </button>
+          </nav>
+
+          <div class="search-wrap reveal" style="--i: 3">
+            <i class="ri-search-line" aria-hidden="true"></i>
+            <input class="search-input" type="search" placeholder="Find a container" aria-label="Find a resource" />
+            <span class="search-shortcut" aria-hidden="true">⌘K</span>
+            <button class="clear-search" type="button" aria-label="Clear search" hidden><i class="ri-close-line"></i></button>
+          </div>
+
+          <section class="resource-panel glass-tile reveal" style="--i: 4" aria-live="polite">
+            <div class="group" data-collapsed="false">
+              <button class="group-heading" type="button" aria-expanded="true">
+                <i class="ri-arrow-down-s-line" aria-hidden="true"></i>
+                <strong>my-webapp</strong>
+                <span class="resource-count">3</span>
+              </button>
+              <div class="group-list">
+                <article class="container-row" data-search="my-webapp-frontend-1 node 22 alpine 3000">
+                  <span class="status-dot" aria-label="Running"></span>
+                  <button class="container-copy row-expand" type="button" aria-expanded="false">
+                    <span class="container-name">my-webapp-frontend-1</span>
+                    <span class="container-meta"><span class="container-image">node:22-alpine</span><span class="port">3000:3000</span></span>
+                  </button>
+                  <div class="row-actions">
+                    <button class="row-action stop" type="button" aria-label="Stop my-webapp-frontend-1" title="Stop"><i class="ri-stop-fill"></i></button>
+                    <button class="row-action" type="button" aria-label="Restart my-webapp-frontend-1" title="Restart"><i class="ri-restart-line"></i></button>
+                    <button class="row-action" type="button" aria-label="More actions for my-webapp-frontend-1" title="More"><i class="ri-more-2-fill"></i></button>
+                  </div>
+                  <div class="container-details" aria-label="Container details">
+                    <div><span class="detail-label">State</span><span class="detail-value">running</span></div>
+                    <div><span class="detail-label">Uptime</span><span class="detail-value">2h 18m</span></div>
+                    <div><span class="detail-label">ID</span><span class="detail-value">a3f7b2c9</span></div>
+                  </div>
+                </article>
+
+                <article class="container-row is-expanded" data-search="my-webapp-api-1 api latest 8080">
+                  <span class="status-dot" aria-label="Running"></span>
+                  <button class="container-copy row-expand" type="button" aria-expanded="true">
+                    <span class="container-name">my-webapp-api-1</span>
+                    <span class="container-meta"><span class="container-image">my-webapp/api:latest</span><span class="port">8080:8080</span></span>
+                  </button>
+                  <div class="row-actions">
+                    <button class="row-action stop" type="button" aria-label="Stop my-webapp-api-1" title="Stop"><i class="ri-stop-fill"></i></button>
+                    <button class="row-action" type="button" aria-label="Restart my-webapp-api-1" title="Restart"><i class="ri-restart-line"></i></button>
+                    <button class="row-action" type="button" aria-label="More actions for my-webapp-api-1" title="More"><i class="ri-more-2-fill"></i></button>
+                  </div>
+                  <div class="container-details" aria-label="Container details">
+                    <div><span class="detail-label">State</span><span class="detail-value">running</span></div>
+                    <div><span class="detail-label">Uptime</span><span class="detail-value">2h 18m</span></div>
+                    <div><span class="detail-label">ID</span><span class="detail-value">1ce48d0f</span></div>
+                  </div>
+                </article>
+
+                <article class="container-row" data-search="my-webapp-db-1 postgres 16 alpine 5432">
+                  <span class="status-dot" aria-label="Running"></span>
+                  <button class="container-copy row-expand" type="button" aria-expanded="false">
+                    <span class="container-name">my-webapp-db-1</span>
+                    <span class="container-meta"><span class="container-image">postgres:16-alpine</span><span class="port">5432:5432</span></span>
+                  </button>
+                  <div class="row-actions">
+                    <button class="row-action stop" type="button" aria-label="Stop my-webapp-db-1" title="Stop"><i class="ri-stop-fill"></i></button>
+                    <button class="row-action" type="button" aria-label="Restart my-webapp-db-1" title="Restart"><i class="ri-restart-line"></i></button>
+                    <button class="row-action" type="button" aria-label="More actions for my-webapp-db-1" title="More"><i class="ri-more-2-fill"></i></button>
+                  </div>
+                  <div class="container-details" aria-label="Container details">
+                    <div><span class="detail-label">State</span><span class="detail-value">running</span></div>
+                    <div><span class="detail-label">Uptime</span><span class="detail-value">2h 18m</span></div>
+                    <div><span class="detail-label">ID</span><span class="detail-value">7b3e901a</span></div>
+                  </div>
+                </article>
+              </div>
+            </div>
+
+            <div class="group" data-collapsed="false">
+              <button class="group-heading" type="button" aria-expanded="true">
+                <i class="ri-arrow-down-s-line" aria-hidden="true"></i>
+                <strong>monitoring</strong>
+                <span class="resource-count">2</span>
+              </button>
+              <div class="group-list">
+                <article class="container-row" data-search="monitoring-grafana-1 grafana latest 3001">
+                  <span class="status-dot" aria-label="Running"></span>
+                  <button class="container-copy row-expand" type="button" aria-expanded="false">
+                    <span class="container-name">monitoring-grafana-1</span>
+                    <span class="container-meta"><span class="container-image">grafana/grafana:latest</span><span class="port">3001:3000</span></span>
+                  </button>
+                  <div class="row-actions">
+                    <button class="row-action stop" type="button" aria-label="Stop monitoring-grafana-1" title="Stop"><i class="ri-stop-fill"></i></button>
+                    <button class="row-action" type="button" aria-label="Restart monitoring-grafana-1" title="Restart"><i class="ri-restart-line"></i></button>
+                    <button class="row-action" type="button" aria-label="More actions for monitoring-grafana-1" title="More"><i class="ri-more-2-fill"></i></button>
+                  </div>
+                  <div class="container-details" aria-label="Container details">
+                    <div><span class="detail-label">State</span><span class="detail-value">running</span></div>
+                    <div><span class="detail-label">Uptime</span><span class="detail-value">5h 42m</span></div>
+                    <div><span class="detail-label">ID</span><span class="detail-value">d9a81c26</span></div>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      const tabs = [...document.querySelectorAll(".resource-tab")];
+      const panel = document.querySelector(".resource-panel");
+      const containerMarkup = panel.innerHTML;
+      const search = document.querySelector(".search-input");
+      const clearSearch = document.querySelector(".clear-search");
+      const toast = document.querySelector(".toast");
+      const resourceNav = document.querySelector(".resource-nav");
+      const trayApp = document.querySelector(".tray-app");
+      const liquidCaustic = document.querySelector(".liquid-caustic");
+      const resources = {
+        images: { icon: "ri-stack-line", message: "The image list would appear here." },
+        volumes: { icon: "ri-hard-drive-3-line", message: "The volume list would appear here." },
+        networks: { icon: "ri-share-line", message: "The network list would appear here." }
+      };
+      let toastTimer;
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 1800);
+      }
+
+      function bindContainerInteractions() {
+        panel.querySelectorAll(".group-heading").forEach((button) => {
+          button.addEventListener("click", () => {
+            const group = button.closest(".group");
+            const collapsed = group.dataset.collapsed === "true";
+            group.dataset.collapsed = String(!collapsed);
+            button.setAttribute("aria-expanded", String(collapsed));
+          });
+        });
+
+        panel.querySelectorAll(".row-expand").forEach((button) => {
+          button.addEventListener("click", () => {
+            const row = button.closest(".container-row");
+            const expanded = row.classList.toggle("is-expanded");
+            button.setAttribute("aria-expanded", String(expanded));
+          });
+        });
+
+        panel.querySelectorAll(".row-action").forEach((button) => {
+          button.addEventListener("click", () => showToast(button.getAttribute("aria-label")));
+        });
+      }
+
+      tabs.forEach((tab, index) => {
+        tab.addEventListener("click", () => {
+          tabs.forEach((item) => item.setAttribute("aria-selected", String(item === tab)));
+          resourceNav.dataset.active = String(index);
+          const key = tab.dataset.tab;
+          search.value = "";
+          clearSearch.hidden = true;
+          search.placeholder = key === "containers" ? "Find a container" : `Find ${key}`;
+          if (key === "containers") {
+            panel.innerHTML = containerMarkup;
+            bindContainerInteractions();
+          } else {
+            const resource = resources[key];
+            panel.innerHTML = `<div class="empty-state"><div><i class="${resource.icon}" aria-hidden="true"></i>${resource.message}</div></div>`;
+          }
+        });
+      });
+
+      search.addEventListener("input", () => {
+        clearSearch.hidden = search.value.length === 0;
+        const query = search.value.trim().toLowerCase();
+        panel.querySelectorAll(".container-row").forEach((row) => {
+          row.hidden = query.length > 0 && !row.dataset.search.includes(query);
+        });
+      });
+
+      clearSearch.addEventListener("click", () => {
+        search.value = "";
+        search.dispatchEvent(new Event("input"));
+        search.focus({ preventScroll: true });
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+          event.preventDefault();
+          search.focus({ preventScroll: true });
+        }
+      });
+
+      document.querySelectorAll(".titlebar .icon-button").forEach((button) => {
+        button.addEventListener("click", () => showToast(button.getAttribute("aria-label")));
+      });
+
+      if (window.matchMedia("(pointer: fine)").matches) {
+        trayApp.addEventListener("pointerenter", () => trayApp.classList.add("is-tracking"));
+        trayApp.addEventListener("pointerleave", () => trayApp.classList.remove("is-tracking"));
+        trayApp.addEventListener("pointermove", (event) => {
+          const bounds = trayApp.getBoundingClientRect();
+          const x = event.clientX - bounds.left - liquidCaustic.offsetWidth / 2;
+          const y = event.clientY - bounds.top - liquidCaustic.offsetHeight / 2;
+          const turn = ((event.clientX - bounds.left) / bounds.width - 0.5) * 16;
+          liquidCaustic.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(${turn}deg) scale(1)`;
+        });
+      }
+
+      bindContainerInteractions();
+    </script>
+  </body>
+</html>

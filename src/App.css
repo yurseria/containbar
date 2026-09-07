@@ -1,7 +1,7 @@
 @import "../tokens.css";
 
-/* Hallmark · macrostructure: Workbench · genre: modern-minimal · theme: Cobalt
- * tone: technical · anchor hue: cobalt · enrichment: none · pre-emit critique: P4 H5 E4 S5 R5 V4
+/* Hallmark · macrostructure: Workbench · genre: atmospheric utility · theme: studied-DNA (source: Apple Control Center reference)
+ * tone: soft atmospheric · anchor hue: graphite · enrichment: NSVisualEffect backdrop with nested liquid components · pre-emit critique: P5 H5 E5 S5 R5 V4
  * contrast: pass (40–41) · nav: native titlebar · footer: none · slop: pass (42–45)
  * honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30)
  * mobile: pass (34, 49, 50–57)
@@ -1303,6 +1303,385 @@ body {
   background: var(--bg-active);
   color: var(--accent);
   border-color: var(--accent);
+}
+
+/* Hallmark · component: appearance theme picker · genre: atmospheric · theme: custom liquid glass
+ * states: default · hover · focus · active · disabled · loading · error · success
+ * contrast: pass (40–41) · native material: NSGlassEffectView with vibrancy fallback
+ */
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-xs);
+}
+
+.theme-option {
+  min-width: 0;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-xs);
+  padding-inline: var(--space-sm);
+  border: var(--rule-thin) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+  cursor: pointer;
+  font: 600 var(--text-sm)/1 var(--font-body);
+  transition: transform var(--dur-micro) var(--ease-out), opacity var(--dur-short) var(--ease-out);
+}
+
+.theme-option:hover,
+.theme-option.active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.theme-option:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.theme-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.theme-option[data-state="loading"] {
+  cursor: wait;
+}
+
+.theme-option[data-state="loading"] > i:first-child {
+  animation: spin 0.8s linear infinite;
+}
+
+.theme-option[data-state="error"],
+.theme-hint--error {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.theme-option[data-state="success"] {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.theme-option-state {
+  margin-inline-start: auto;
+}
+
+:root[data-theme="liquid-glass"] .app {
+  height: 100vh;
+  gap: var(--space-xs);
+  padding: 1.5rem;
+  border: 0;
+  background: transparent;
+  box-shadow: 0 var(--space-xs) var(--space-xl) var(--color-shadow);
+}
+
+:root[data-theme="liquid-glass"] :is(.content, .settings, .runtime-setup) {
+  scrollbar-width: none;
+}
+
+:root[data-theme="liquid-glass"] :is(.content, .settings, .runtime-setup)::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+:root[data-theme="liquid-glass"] {
+  color-scheme: dark;
+}
+
+:root[data-theme="liquid-glass"] .glass-surface {
+  border: var(--rule-thin) solid var(--color-glass-rim);
+  border-radius: var(--radius-lg);
+  background: var(--color-glass-scrim);
+  color: var(--color-ink);
+  box-shadow: inset 0 calc(var(--rule-thin) * -1) 0 var(--color-glass-depth);
+  text-shadow: none;
+}
+
+:root[data-theme="liquid-glass"] :is(.titlebar, .tabs, .search-bar, .settings-header) {
+  flex: 0 0 auto;
+  margin: 0;
+  border: var(--rule-thin) solid var(--color-glass-rim);
+  border-radius: var(--radius-lg);
+  background: var(--color-glass-scrim);
+  color: var(--color-ink);
+  box-shadow: inset 0 calc(var(--rule-thin) * -1) 0 var(--color-glass-depth);
+  text-shadow: none;
+}
+
+:root[data-theme="liquid-glass"] :is(.titlebar, .tabs, .settings-header) {
+  min-height: 3.15rem;
+}
+
+:root[data-theme="liquid-glass"] :is(.titlebar, .tabs) {
+  background-color: var(--color-glass-scrim);
+}
+
+:root[data-theme="liquid-glass"] .tabs {
+  overflow: hidden;
+}
+
+:root[data-theme="liquid-glass"] .tab {
+  color: var(--color-glass-nav-idle);
+  box-shadow: none;
+}
+
+:root[data-theme="liquid-glass"] .tab:hover {
+  background-color: transparent;
+  color: var(--color-ink);
+}
+
+:root[data-theme="liquid-glass"] .search-bar {
+  min-height: 2.6rem;
+  padding-inline: var(--space-sm);
+}
+
+:root[data-theme="liquid-glass"] :is(.content, .settings) {
+  min-height: 0;
+}
+
+:root[data-theme="liquid-glass"] .tab-content {
+  padding: 0 var(--space-3xs) var(--space-xs);
+}
+
+:root[data-theme="liquid-glass"] .group {
+  margin-bottom: var(--space-xs);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  box-shadow: none;
+}
+
+:root[data-theme="liquid-glass"] .group-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding-inline: var(--space-md) var(--space-3xs);
+  margin-top: var(--space-xs);
+}
+
+:root[data-theme="liquid-glass"] .container-item + .container-item {
+  border-top: 0;
+}
+
+:root[data-theme="liquid-glass"] .list-item {
+  margin-bottom: var(--space-xs);
+  border: var(--rule-thin) solid var(--color-glass-rim);
+  border-radius: var(--radius-lg);
+  background: var(--color-glass-scrim);
+  color: var(--color-ink);
+  box-shadow: inset 0 calc(var(--rule-thin) * -1) 0 var(--color-glass-depth);
+}
+
+:root[data-theme="liquid-glass"] .list-item:not(.container-item) {
+  padding-inline: var(--space-lg);
+}
+
+:root[data-theme="liquid-glass"] .container-item.list-item {
+  margin-bottom: 0;
+  background: var(--color-glass-scrim-hover);
+}
+
+:root[data-theme="liquid-glass"] .glass-surface {
+  position: relative;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme="liquid-glass"] .tab.active {
+  background: transparent;
+  color: var(--color-ink);
+  box-shadow: inset 0 -1px 0 var(--color-ink);
+}
+
+:root[data-theme="liquid-glass"] :is(.group-header:hover, .container-item:hover, .container-item.expanded, .list-item:hover, .list-item.expanded) {
+  background: var(--color-glass-scrim-hover);
+}
+
+:root[data-theme="liquid-glass"] .container-item.list-item:is(:hover, .expanded) {
+  background: var(--color-glass-scrim-active);
+}
+
+:root[data-theme="liquid-glass"] :is(.container-detail, .runtime-card, .runtime-setup-mark, .settings-select, .scale-btn, .theme-option) {
+  background: var(--color-glass-raised);
+  border-color: var(--color-glass-rule);
+}
+
+:root[data-theme="liquid-glass"] :is(.theme-option, .scale-btn) {
+  color: var(--color-glass-nav-idle);
+}
+
+:root[data-theme="liquid-glass"] :is(.theme-option, .scale-btn):hover:not(:disabled) {
+  background: var(--color-glass-hover);
+  border-color: var(--color-rule-strong);
+  color: var(--color-ink);
+}
+
+:root[data-theme="liquid-glass"] :is(.theme-option, .scale-btn).active {
+  background: var(--color-glass-active);
+  border-color: var(--color-ink);
+  color: var(--color-ink);
+}
+
+:root[data-theme="liquid-glass"] :is(.context-menu, .confirm-dialog, .modal-dialog) {
+  border-color: var(--color-glass-rim);
+  background: var(--color-glass-scrim-active);
+  color: var(--color-ink);
+  box-shadow: 0 var(--space-xs) var(--space-lg) var(--color-shadow);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root[data-theme="liquid-glass"] .settings-content {
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-3xs) var(--space-xs);
+}
+
+:root[data-theme="liquid-glass"] .settings-toggle input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+  appearance: none;
+  display: grid;
+  place-items: center;
+  border: var(--rule-thin) solid var(--color-glass-nav-idle);
+  border-radius: 0.32rem;
+  background: var(--color-glass-raised);
+  transition: border-color var(--dur-micro) var(--ease-out), background-color var(--dur-micro) var(--ease-out);
+}
+
+:root[data-theme="liquid-glass"] .settings-toggle:hover input[type="checkbox"] {
+  border-color: var(--color-ink);
+}
+
+:root[data-theme="liquid-glass"] .settings-toggle input[type="checkbox"]::after {
+  content: "";
+  width: 0.5rem;
+  height: 0.28rem;
+  border-bottom: 2px solid var(--color-accent-ink);
+  border-left: 2px solid var(--color-accent-ink);
+  opacity: 0;
+  transform: translateY(-0.06rem) rotate(-45deg);
+}
+
+:root[data-theme="liquid-glass"] .settings-toggle input[type="checkbox"]:checked {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+}
+
+:root[data-theme="liquid-glass"] .settings-toggle input[type="checkbox"]:checked::after {
+  opacity: 1;
+}
+
+:root[data-theme="liquid-glass"] .settings-group {
+  gap: var(--space-xs);
+  padding: var(--space-md) var(--space-lg);
+  border: var(--rule-thin) solid var(--color-glass-rim);
+  border-radius: var(--radius-lg);
+  background: var(--color-glass-scrim);
+  color: var(--color-ink);
+  box-shadow: inset 0 calc(var(--rule-thin) * -1) 0 var(--color-glass-depth);
+  text-shadow: none;
+}
+
+:root[data-theme="liquid-glass"] .runtime-card {
+  border-color: transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+}
+
+:root[data-theme="liquid-glass"] .runtime-card.is-selected {
+  border-color: var(--color-ink);
+}
+
+:root[data-theme="liquid-glass"] .settings-runtime .runtime-card {
+  border-radius: 10px;
+}
+
+:root[data-theme="liquid-glass"] .disconnected {
+  margin-bottom: 0;
+  padding: var(--space-lg);
+  border: var(--rule-thin) solid var(--color-glass-rim);
+  border-radius: var(--radius-lg);
+  background: var(--color-glass-scrim);
+  color: var(--color-ink);
+  box-shadow: inset 0 calc(var(--rule-thin) * -1) 0 var(--color-glass-depth);
+}
+
+:root[data-theme="liquid-glass"] :is(.empty, .error-banner) {
+  border-color: var(--color-glass-rim);
+  border-radius: var(--radius-lg);
+  background: var(--color-glass-scrim);
+  box-shadow: inset 0 calc(var(--rule-thin) * -1) 0 var(--color-glass-depth);
+}
+
+:root[data-theme="liquid-glass"] .empty {
+  color: var(--color-ink);
+}
+
+:root[data-theme="liquid-glass"] .error-banner {
+  color: var(--color-error);
+}
+
+:root[data-theme="liquid-glass"] .item-name {
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+:root[data-theme="liquid-glass"] .group-name {
+  font-weight: 650;
+}
+
+:root[data-theme="liquid-glass"] :is(.item-detail, .item-meta) {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+:root[data-theme="liquid-glass"] :is(.group-count, .detail-label, .detail-value, .disconnected-hint) {
+  font-weight: 600;
+}
+
+:root[data-theme="liquid-glass"] .status-dot {
+  opacity: 0.9;
+  box-shadow: none;
+}
+
+:root[data-theme="liquid-glass"] .status-dot.running {
+  box-shadow: 0 0 3px color-mix(in oklch, var(--color-success) 45%, transparent);
+}
+
+:root[data-theme="liquid-glass"] .port-badge {
+  color: var(--color-glass-port);
+  background: var(--color-glass-port-soft);
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+:root[data-theme="liquid-glass"] .count-badge {
+  border: var(--rule-thin) solid var(--color-glass-rule);
+  color: var(--color-glass-nav-idle);
+  background: var(--color-glass-raised);
+}
+
+:root[data-theme="liquid-glass"] :is(
+  .theme-option:hover:not(.active),
+  .retry-btn:not(.primary):hover,
+  .update-check-btn:hover:not(:disabled),
+  .runtime-action:not(.runtime-action--primary):hover:not(:disabled)
+) {
+  color: var(--color-ink);
+  border-color: var(--color-rule-strong);
+}
+
+:root[data-theme="liquid-glass"] :is(.action-btn.terminal:hover, .action-btn.logs:hover) {
+  color: var(--color-ink);
 }
 
 /* === File Explorer === */

@@ -289,7 +289,7 @@ function App() {
 
   return (
     <div className="app" ref={appRef}>
-      <div className="titlebar">
+      <div className="titlebar glass-surface chrome-glass-surface">
         <span className="titlebar-text">Docker Tray</span>
         {docker.loading && <span className="loading-indicator" />}
         <button
@@ -345,7 +345,7 @@ function App() {
         />
       ) : (
         <>
-          <nav className="tabs">
+          <nav className="tabs glass-surface chrome-glass-surface">
             {TABS.map((tab) => (
               <button
                 key={tab.key}

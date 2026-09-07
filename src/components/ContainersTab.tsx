@@ -117,7 +117,7 @@ export function ContainersTab({ groups, search, onStart, onStop, onRestart, onSt
         return (
           <div key={group.name} className="group">
             <div
-              className="group-header"
+              className="group-header glass-surface"
               onClick={() => toggle(group.name)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -157,7 +157,7 @@ export function ContainersTab({ groups, search, onStart, onStop, onRestart, onSt
                   return (
                     <div
                       key={c.id}
-                      className={`container-item state-${c.state} ${expanded === c.id ? "expanded" : ""}`}
+                      className={`container-item list-item glass-surface clickable state-${c.state} ${expanded === c.id ? "expanded" : ""}`}
                       onClick={() => setExpanded(expanded === c.id ? null : c.id)}
                       onContextMenu={(e) => {
                         e.preventDefault();

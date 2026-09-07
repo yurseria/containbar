@@ -62,3 +62,53 @@
   --radius-md: 0.625rem;
   --radius-lg: 0.875rem;
 }
+
+:root[data-theme="liquid-glass"] {
+  --radius-lg: 28px;
+  --color-paper: oklch(18% 0.025 274);
+  --color-paper-2: oklch(23% 0.03 267);
+  --color-paper-3: oklch(31% 0.018 263);
+  --color-rule: oklch(52% 0.022 258);
+  --color-rule-strong: oklch(68% 0.02 255);
+  --color-ink: oklch(98% 0.008 255);
+  --color-ink-2: oklch(96% 0.012 255);
+  --color-muted: oklch(92% 0.016 258);
+  --color-faint: oklch(86% 0.018 260);
+  --color-accent: oklch(78% 0.14 226);
+  --color-accent-ink: oklch(18% 0.04 255);
+  --color-accent-soft: oklch(78% 0.14 226 / 0.14);
+  --color-focus: oklch(84% 0.13 220);
+  --color-success: oklch(70% 0.16 145);
+  --color-success-soft: oklch(70% 0.16 145 / 0.14);
+  --color-error: oklch(72% 0.18 25);
+  --color-error-soft: oklch(72% 0.18 25 / 0.14);
+  --color-error-rule: oklch(72% 0.18 25 / 0.36);
+  --color-warning: oklch(82% 0.14 75);
+  --color-overlay: oklch(12% 0.025 258 / 0.46);
+  --color-shadow: oklch(8% 0.025 258 / 0.36);
+  --color-log: oklch(18% 0.025 258);
+  --color-log-rail: oklch(94% 0.02 246 / 0.06);
+  --color-log-hover: oklch(94% 0.02 246 / 0.08);
+  --color-log-muted: oklch(58% 0.025 252);
+  --color-log-text: oklch(90% 0.018 246);
+  --color-glass-canvas: transparent;
+  --color-glass-surface: transparent;
+  --color-glass-raised: oklch(96% 0.008 255 / 0.12);
+  --color-glass-hover: oklch(96% 0.008 255 / 0.14);
+  --color-glass-active: oklch(96% 0.008 255 / 0.2);
+  --color-glass-modal: transparent;
+  --color-glass-rule: oklch(96% 0.008 255 / 0.26);
+  --color-glass-scrim: rgb(53 53 56 / 0.432);
+  --color-glass-scrim-hover: linear-gradient(rgb(0 0 0 / 0.08), rgb(0 0 0 / 0.08)), rgb(53 53 56 / 0.432);
+  --color-glass-scrim-active: linear-gradient(rgb(0 0 0 / 0.13), rgb(0 0 0 / 0.13)), rgb(53 53 56 / 0.432);
+  --color-glass-rim: oklch(98% 0.008 255 / 0.46);
+  --color-glass-depth: oklch(8% 0.018 262 / 0.32);
+  --color-glass-text-shadow: oklch(2% 0.01 262 / 0.62);
+  --color-glass-nav-idle: oklch(86% 0.014 255);
+  --color-glass-port: oklch(91% 0.04 225);
+  --color-glass-port-soft: oklch(34% 0.018 245 / 0.3);
+  --bg-card: var(--color-glass-surface);
+  --bg-hover: var(--color-glass-hover);
+  --bg-active: var(--color-glass-active);
+  --border: var(--color-glass-rule);
+}
