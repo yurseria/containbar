@@ -1,12 +1,12 @@
 [package]
-name = "docker-tray"
+name = "containbar"
 version = "0.6.0"
-description = "Docker management tray app"
+description = "Containers in your menu bar — Docker, Colima, and Apple Container"
 authors = ["yurseria"]
 edition = "2021"
 
 [lib]
-name = "docker_tray_lib"
+name = "containbar_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]

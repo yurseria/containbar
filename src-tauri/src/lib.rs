@@ -404,7 +404,7 @@ pub fn run() {
                 .checked(is_autostart)
                 .build(app)
                 .expect("Failed to build autostart menu item");
-            let quit_item = MenuItemBuilder::with_id("quit", "Quit Docker Tray")
+            let quit_item = MenuItemBuilder::with_id("quit", "Quit Containbar")
                 .build(app)
                 .expect("Failed to build quit menu item");
             let tray_menu = MenuBuilder::new(app)
@@ -419,7 +419,7 @@ pub fn run() {
                 .icon_as_template(true)
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
-                .tooltip("Docker Tray")
+                .tooltip("Containbar")
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "quit" => {
                         app.exit(0);
@@ -446,7 +446,7 @@ pub fn run() {
                         let window = match app.get_webview_window("main") {
                             Some(w) => w,
                             None => WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                                .title("Docker Tray")
+                                .title("Containbar")
                                 .inner_size(420.0, 560.0)
                                 .decorations(false)
                                 .skip_taskbar(true)
@@ -516,7 +516,7 @@ pub fn run() {
                 if !starting.load(Ordering::SeqCst) {
                     starting.store(true, Ordering::SeqCst);
                     if let Some(tray) = app_handle.tray_by_id("docker-tray") {
-                        let _ = tray.set_tooltip(Some("Docker Tray — Starting runtime..."));
+                        let _ = tray.set_tooltip(Some("Containbar — Starting runtime..."));
                     }
                     std::thread::spawn(move || {
                         let success = match prepare_provider(&app_handle, &resource_dir, provider) {
@@ -536,19 +536,15 @@ pub fn run() {
                         starting.store(false, Ordering::SeqCst);
                         if let Some(tray) = app_handle.tray_by_id("docker-tray") {
                             let _ = tray.set_tooltip(Some(if success {
-                                "Docker Tray"
+                                "Containbar"
                             } else {
-                                "Docker Tray — Runtime failed"
+                                "Containbar — Runtime failed"
                             }));
                         }
                         if success {
-                            send_notification(&app_handle, "Docker Tray", "Runtime is ready");
+                            send_notification(&app_handle, "Containbar", "Runtime is ready");
                         } else {
-                            send_notification(
-                                &app_handle,
-                                "Docker Tray",
-                                "Runtime failed to start",
-                            );
+                            send_notification(&app_handle, "Containbar", "Runtime failed to start");
                         }
                     });
                 }
@@ -938,7 +934,7 @@ fn runtime_start(
 
     // Update tray tooltip
     if let Some(tray) = app.tray_by_id("docker-tray") {
-        let _ = tray.set_tooltip(Some("Docker Tray — Starting runtime..."));
+        let _ = tray.set_tooltip(Some("Containbar — Starting runtime..."));
     }
 
     let app_handle = app.clone();
@@ -964,17 +960,17 @@ fn runtime_start(
         // Update tray tooltip
         if let Some(tray) = app_handle.tray_by_id("docker-tray") {
             let _ = tray.set_tooltip(Some(if success {
-                "Docker Tray"
+                "Containbar"
             } else {
-                "Docker Tray — Runtime failed"
+                "Containbar — Runtime failed"
             }));
         }
 
         // Send macOS notification
         if success {
-            send_notification(&app_handle, "Docker Tray", "Runtime is ready");
+            send_notification(&app_handle, "Containbar", "Runtime is ready");
         } else {
-            send_notification(&app_handle, "Docker Tray", "Runtime failed to start");
+            send_notification(&app_handle, "Containbar", "Runtime failed to start");
         }
     });
 
@@ -1035,7 +1031,7 @@ fn apply_vm_config(
     starting.store(true, Ordering::SeqCst);
 
     if let Some(tray) = app.tray_by_id("docker-tray") {
-        let _ = tray.set_tooltip(Some("Docker Tray — Restarting runtime..."));
+        let _ = tray.set_tooltip(Some("Containbar — Restarting runtime..."));
     }
 
     let app_handle = app.clone();
@@ -1078,20 +1074,20 @@ fn apply_vm_config(
 
         if let Some(tray) = app_handle.tray_by_id("docker-tray") {
             let _ = tray.set_tooltip(Some(if success {
-                "Docker Tray"
+                "Containbar"
             } else {
-                "Docker Tray — Runtime failed"
+                "Containbar — Runtime failed"
             }));
         }
 
         if success {
             send_notification(
                 &app_handle,
-                "Docker Tray",
+                "Containbar",
                 "Runtime restarted with new settings",
             );
         } else {
-            send_notification(&app_handle, "Docker Tray", "Runtime failed to restart");
+            send_notification(&app_handle, "Containbar", "Runtime failed to restart");
         }
     });
 
@@ -1138,12 +1134,12 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateInfo, String> 
     let current = app.package_info().version.to_string();
 
     let client = reqwest::Client::builder()
-        .user_agent("docker-tray-updater")
+        .user_agent("containbar-updater")
         .build()
         .map_err(|e| e.to_string())?;
 
     let resp: serde_json::Value = client
-        .get("https://api.github.com/repos/yurseria/docker-tray/releases/latest")
+        .get("https://api.github.com/repos/yurseria/containbar/releases/latest")
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -1155,7 +1151,7 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateInfo, String> 
     let latest = tag.trim_start_matches('v').to_string();
     let release_url = resp["html_url"]
         .as_str()
-        .unwrap_or("https://github.com/yurseria/docker-tray/releases")
+        .unwrap_or("https://github.com/yurseria/containbar/releases")
         .to_string();
 
     Ok(UpdateInfo {

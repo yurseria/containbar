@@ -326,7 +326,7 @@ export function Settings({
                 invoke("set_autostart", { enabled: val }).then(() => setAutostart(val)).catch(() => {});
               }}
             />
-            <span className="settings-hint">Launch Docker Tray when you log in</span>
+            <span className="settings-hint">Launch Containbar when you log in</span>
           </label>
         </div>
 
@@ -388,7 +388,7 @@ export function Settings({
 
         <div className="settings-group">
           <label className="settings-label">About</label>
-          <span className="settings-hint">Docker Tray{appVersion ? ` v${appVersion}` : ""}</span>
+          <span className="settings-hint">Containbar{appVersion ? ` v${appVersion}` : ""}</span>
           <div className="update-check-row">
             <button
               className="update-check-btn"

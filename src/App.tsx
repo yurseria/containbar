@@ -204,7 +204,7 @@ function App() {
     return (
       <div className="app runtime-app" ref={appRef}>
         <div className="titlebar">
-          <span className="titlebar-text">Docker Tray</span>
+          <span className="titlebar-text">Containbar</span>
         </div>
         <RuntimeSetup
           overview={runtimeOverview}
@@ -242,7 +242,7 @@ function App() {
     return (
       <div className="app" ref={appRef}>
         <div className="titlebar">
-          <span className="titlebar-text">Docker Tray</span>
+          <span className="titlebar-text">Containbar</span>
           <button
             className="settings-btn"
             onClick={() => { refreshRuntimeOverview(); setShowRuntimeManager(true); }}
@@ -290,7 +290,7 @@ function App() {
   return (
     <div className="app" ref={appRef}>
       <div className="titlebar glass-surface chrome-glass-surface">
-        <span className="titlebar-text">Docker Tray</span>
+        <span className="titlebar-text">Containbar</span>
         {docker.loading && <span className="loading-indicator" />}
         <button
           className="settings-btn"

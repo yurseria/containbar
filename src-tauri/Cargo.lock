@@ -580,6 +580,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "containbar"
+version = "0.6.0"
+dependencies = [
+ "bollard",
+ "chrono",
+ "cocoa",
+ "dirs 6.0.0",
+ "futures-util",
+ "objc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-quartz-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-liquid-glass",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tokio",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -920,34 +948,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "docker-tray"
-version = "0.6.0"
-dependencies = [
- "bollard",
- "chrono",
- "cocoa",
- "dirs 6.0.0",
- "futures-util",
- "objc",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "objc2-quartz-core",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "serde_yaml",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-liquid-glass",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tokio",
 ]
 
 [[package]]

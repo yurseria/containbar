@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    docker_tray_lib::run()
+    containbar_lib::run()
 }

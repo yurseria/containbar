@@ -1,11 +1,17 @@
-# Docker Tray
+# Containbar
+
+*Containers in your menu bar.*
+
+Docker Tray의 새 이름입니다. 기존 설정 호환성을 위해 앱 식별자와 설정 저장 키는 유지합니다.
+이전 앱에서 업그레이드하면 Containbar를 실행하고 로그인 시 자동 실행을 다시 설정해 주세요.
+기존 Docker Tray.app은 새 앱의 정상 동작을 확인한 뒤 제거할 수 있습니다.
 
 <p align="center">
   <img src="src-tauri/icons/icon.png" width="128" />
 </p>
 
 <p align="center">
-  macOS 메뉴바에서 Docker 컨테이너, 이미지, 볼륨, 네트워크를 관리하는 경량 앱
+  macOS 메뉴바에서 Docker·Colima·Apple Container를 관리하는 경량 앱
   <br/>
   Docker Desktop 없이도 동작하는 내장 런타임(Colima) 포함
   <br/>
@@ -20,7 +26,9 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot.png" width="420" />
+  <img src="assets/theme-comparison-refraction.png" width="512" alt="Containbar 테마 비교 시안: 왼쪽 Cobalt, 오른쪽 Liquid Glass" />
+  <br/>
+  <sub>Cobalt / Liquid Glass — AI로 제작한 테마 비교 시안이며 실제 앱 캡처가 아닙니다.</sub>
 </p>
 
 ## 기능
@@ -57,12 +65,12 @@
 ## 설치
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yurseria/docker-tray/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yurseria/containbar/main/scripts/install.sh | bash
 ```
 
 ## Docker 런타임
 
-Docker Tray는 Docker Desktop 없이도 동작합니다.
+Containbar는 Docker Desktop 없이도 동작합니다.
 
 | | 외부 런타임 | 내장 런타임 |
 |---|---|---|

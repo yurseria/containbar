@@ -1,11 +1,17 @@
-# Docker Tray
+# Containbar
+
+*Containers in your menu bar.*
+
+Formerly Docker Tray. The app identifier and settings storage key remain unchanged for compatibility.
+After upgrading, launch Containbar and reconfigure Start at Login.
+You can remove the old Docker Tray.app after confirming the new app works.
 
 <p align="center">
   <img src="src-tauri/icons/icon.png" width="128" />
 </p>
 
 <p align="center">
-  A lightweight macOS menubar app for managing Docker containers, images, volumes, and networks.
+  A lightweight macOS menu bar app for managing Docker, Colima, and Apple Container.
   <br/>
   Includes a built-in runtime (Colima) — no Docker Desktop required.
   <br/>
@@ -20,7 +26,9 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot.png" width="420" />
+  <img src="assets/theme-comparison-refraction.png" width="512" alt="Containbar theme concept: Cobalt on the left, Liquid Glass on the right" />
+  <br/>
+  <sub>Cobalt / Liquid Glass — AI-generated theme concept, not an actual app capture.</sub>
 </p>
 
 ## Features
@@ -36,7 +44,7 @@
 - **System Tray**: Lives in your menubar, click to toggle, right-click to quit
 - **Container Lifecycle**: Start, stop, restart, remove
 - **Group Control**: Start/stop/remove entire Compose groups
-- **Compose Support**: Import and run `docker-compose.yaml` files (Docker Compose on Docker/Colima, Mocker on Apple Container). When switching to Apple, Docker Tray identifies an existing Compose project that owns conflicting ports and can stop it after explicit confirmation.
+- **Compose Support**: Import and run `docker-compose.yaml` files (Docker Compose on Docker/Colima, Mocker on Apple Container). When switching to Apple, Containbar identifies an existing Compose project that owns conflicting ports and can stop it after explicit confirmation.
 - **Apple Compose Restore**: Preserves `restart: always` and `unless-stopped` intent on Apple Container, restoring eligible services and network host mappings after the runtime or app restarts
 - **Image Management**: Pull, create containers from, and remove images
 - **Volume & Network**: Browse and remove
@@ -57,12 +65,12 @@
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yurseria/docker-tray/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yurseria/containbar/main/scripts/install.sh | bash
 ```
 
 ## Docker Runtime
 
-Docker Tray works without Docker Desktop.
+Containbar works without Docker Desktop.
 
 | | External Runtime | Built-in Runtime |
 |---|---|---|

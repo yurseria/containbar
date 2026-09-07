@@ -1539,7 +1539,7 @@ fn services_to_restore(
 }
 
 /// Restore Compose services after the Apple Container backend (or the host)
-/// starts. Apple has no daemon-level restart policies, so Docker Tray persists
+/// starts. Apple has no daemon-level restart policies, so Containbar persists
 /// the Compose intent and replays only `always` / eligible `unless-stopped`.
 pub fn restore_apple_compose_projects(app: &tauri::AppHandle) -> Result<usize, String> {
     let mut state = read_apple_compose_restore_state(app)?;
@@ -1571,7 +1571,7 @@ pub fn restore_apple_compose_projects(app: &tauri::AppHandle) -> Result<usize, S
             }
         };
         // A running service is explicit evidence that it was started again,
-        // including when the user did so outside Docker Tray. Clear any stale
+        // including when the user did so outside Containbar. Clear any stale
         // manual-stop marker before the next backend restart.
         if let Some(saved_project) = state.projects.get_mut(&project_name) {
             for container in containers.iter().filter(|container| container.running) {

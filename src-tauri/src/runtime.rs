@@ -208,10 +208,14 @@ fn bundled_colima(resource_dir: &Path) -> Option<PathBuf> {
     }
 
     // 3. Check installed app location (for dev mode where resource_dir differs)
-    let installed =
-        PathBuf::from("/Applications/Docker Tray.app/Contents/Resources/runtime/colima/bin/colima");
-    if installed.exists() {
-        return Some(installed);
+    for path in [
+        "/Applications/Containbar.app/Contents/Resources/runtime/colima/bin/colima",
+        "/Applications/Docker Tray.app/Contents/Resources/runtime/colima/bin/colima",
+    ] {
+        let installed = PathBuf::from(path);
+        if installed.exists() {
+            return Some(installed);
+        }
     }
 
     // 4. Check common system paths
@@ -246,7 +250,7 @@ pub(crate) fn homebrew() -> Option<PathBuf> {
         })
 }
 
-/// Resolve Mocker even when Docker Tray was launched from Finder with a
+/// Resolve Mocker even when Containbar was launched from Finder with a
 /// minimal PATH. `MOCKER_BIN` is useful for development and integration tests.
 pub(crate) fn mocker_cli() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("MOCKER_BIN") {

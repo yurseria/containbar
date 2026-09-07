@@ -113,11 +113,11 @@ function updateToml(filepath) {
 
 function updateCargoLock(filepath) {
   let content = readFileSync(filepath, "utf8");
-  const packagePattern = /(\[\[package\]\]\nname = "docker-tray"\nversion = ")[^"]+("\n)/;
+  const packagePattern = /(\[\[package\]\]\nname = "containbar"\nversion = ")[^"]+("\n)/;
   const current = content.match(packagePattern)?.[0].match(/version = "([^"]+)"/)?.[1];
   if (checkOnly) {
     if (current !== version) {
-      throw new Error(`${filepath} has docker-tray ${current}, expected ${version}`);
+      throw new Error(`${filepath} has containbar ${current}, expected ${version}`);
     }
     return;
   }
