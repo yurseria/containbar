@@ -103,7 +103,7 @@ jobs:
       - name: Verify packaged app version
         run: |
           EXPECTED="${TAG#v}"
-          APP="src-tauri/target/release/bundle/macos/Docker Tray.app"
+          APP="src-tauri/target/release/bundle/macos/Containbar.app"
           ACTUAL=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
           test "$ACTUAL" = "$EXPECTED" || {
             echo "Packaged app version $ACTUAL does not match release $EXPECTED" >&2

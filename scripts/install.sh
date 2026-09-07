@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Docker Tray - Quick installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/yurseria/docker-tray/main/scripts/install.sh | bash
+# Containbar - Quick installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/yurseria/containbar/main/scripts/install.sh | bash
 set -euo pipefail
 
-REPO="yurseria/docker-tray"
-APP_NAME="Docker Tray"
+REPO="yurseria/containbar"
+APP_NAME="Containbar"
 
 # ── Helpers ──
 
@@ -77,7 +77,7 @@ find_asset() {
 
 stop_running_app() {
   local pids
-  pids="$(pgrep -x docker-tray 2>/dev/null || true)"
+  pids="$(pgrep -x 'containbar|docker-tray' 2>/dev/null || true)"
   if [ -z "$pids" ]; then
     return
   fi
@@ -88,7 +88,7 @@ stop_running_app() {
   kill -TERM $pids 2>/dev/null || true
   local attempt
   for attempt in $(seq 1 50); do
-    if ! pgrep -x docker-tray >/dev/null 2>&1; then
+    if ! pgrep -x 'containbar|docker-tray' >/dev/null 2>&1; then
       return
     fi
     sleep 0.1

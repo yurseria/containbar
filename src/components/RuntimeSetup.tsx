@@ -16,7 +16,7 @@ const RUNTIME_META: Record<Provider, {
   colima: {
     name: "Colima",
     icon: "ri-box-3-line",
-    description: "A lightweight Docker-compatible VM managed by Docker Tray.",
+    description: "A lightweight Docker-compatible VM managed by Containbar.",
     features: ["Docker Compose", "VM controls"],
   },
   apple: {
@@ -190,7 +190,7 @@ export function RuntimeSetup({
         </div>
         <div>
           <h1>Choose your container runtime</h1>
-          <p>Use an existing engine or let Docker Tray set one up. You can switch later without moving or deleting containers.</p>
+          <p>Use an existing engine or let Containbar set one up. You can switch later without moving or deleting containers.</p>
         </div>
       </header>
       <RuntimePicker
