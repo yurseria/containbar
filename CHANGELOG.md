@@ -1,3 +1,15 @@
+# v0.6.0 (Mon Sep 07 2026)
+
+#### 🚀 Enhancement
+
+- feat: add native Liquid Glass theme and refine tray layouts ([@yurseria](https://github.com/yurseria))
+
+#### Authors: 1
+
+- minsu ([@yurseria](https://github.com/yurseria))
+
+---
+
 # v0.5.0 (Tue Aug 25 2026)
 
 #### 🚀 Enhancement
