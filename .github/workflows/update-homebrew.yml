@@ -1,0 +1,36 @@
+name: Update Homebrew tap
+
+on:
+  workflow_call:
+    secrets:
+      GH_TOKEN:
+        required: false
+      HOMEBREW_TAP_TOKEN:
+        required: false
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Request tap update after release assets are uploaded
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Set HOMEBREW_TAP_TOKEN (or GH_TOKEN) with Actions write access to yurseria/homebrew-tap."
+            exit 1
+          fi
+          for attempt in 1 2 3; do
+            if gh workflow run update-casks.yml --repo yurseria/homebrew-tap --ref main; then
+              echo "Tap update requested. Check https://github.com/yurseria/homebrew-tap/actions"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+          done
+          echo "::error::Tap dispatch failed. Verify token access to yurseria/homebrew-tap; its scheduled update remains a fallback."
+          exit 1

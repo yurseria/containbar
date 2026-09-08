@@ -143,3 +143,10 @@ jobs:
             ---
             ${{ needs.release.outputs.install_guide }}
           files: artifacts/tauri-macos/*
+
+  update-homebrew:
+    needs: upload-assets
+    uses: ./.github/workflows/update-homebrew.yml
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

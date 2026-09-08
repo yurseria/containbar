@@ -65,8 +65,14 @@ You can remove the old Docker Tray.app after confirming the new app works.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yurseria/containbar/main/scripts/install.sh | bash
+brew install --cask yurseria/tap/containbar
 ```
+
+Requires [Homebrew](https://brew.sh), macOS 13+, and Apple Silicon. Update with `brew update` followed by `brew upgrade --cask yurseria/tap/containbar`.
+
+The app is not Developer ID signed or notarized. If macOS blocks it, use **System Settings → Privacy & Security → Open Anyway** only if you trust the app. Homebrew does not bypass Gatekeeper. The v0.6.0 release still installs **Docker Tray.app**; a future renamed release will install **Containbar.app**.
+
+See the [Homebrew Tap](https://github.com/yurseria/homebrew-tap) for existing-install guidance and [release integration](.github/HOMEBREW.md) for maintainers.
 
 ## Docker Runtime
 
@@ -132,8 +138,7 @@ The built app will be in `src-tauri/target/release/bundle/`.
 │   ├── runtime/            # Bundled binaries (git ignored)
 │   └── tauri.conf.json     # Tauri config
 ├── scripts/
-│   ├── bundle-runtime.sh   # Bundle Colima/Lima/Docker CLI
-│   └── install.sh          # One-line install script
+│   └── bundle-runtime.sh   # Bundle Colima/Lima/Docker CLI
 └── vite.config.ts
 ```
 

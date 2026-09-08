@@ -1,22 +1,22 @@
 ## Install
 
-### macOS (Quick Install)
+### macOS (Homebrew)
+
+Requires Homebrew, macOS 13+, and Apple Silicon.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yurseria/containbar/main/scripts/install.sh | bash
+brew install --cask yurseria/tap/containbar
 ```
 
-> `curl`, `jq` 필요
+To update:
 
-### macOS (수동 설치)
-
-macOS 빌드는 Apple 인증서로 서명되지 않았습니다. 브라우저에서 DMG를 다운로드한 경우 Gatekeeper가 앱을 차단합니다.
-
-**방법 1 — 터미널:**
 ```bash
-xattr -rd com.apple.quarantine /Applications/Containbar.app
+brew update
+brew upgrade --cask yurseria/tap/containbar
 ```
 
-**방법 2 — Finder:**
-1. `.dmg`를 열어 **Containbar**를 Applications로 드래그
-2. Applications에서 앱을 **우클릭 → 열기** (최초 1회만)
+The Tap refresh is triggered after release assets are uploaded. If the new version is not visible yet, wait for the [tap workflow](https://github.com/yurseria/homebrew-tap/actions) to finish and run `brew update` again.
+
+### macOS (manual installation / first launch)
+
+Download the DMG and drag **Containbar** to Applications. The app is not Developer ID signed or notarized. If macOS blocks launch, use **System Settings → Privacy & Security → Open Anyway** only if you trust the app. Homebrew does not bypass Gatekeeper. See [Apple's instructions](https://support.apple.com/en-us/102445).

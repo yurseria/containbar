@@ -65,8 +65,14 @@ Docker Tray의 새 이름입니다. 기존 설정 호환성을 위해 앱 식별
 ## 설치
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yurseria/containbar/main/scripts/install.sh | bash
+brew install --cask yurseria/tap/containbar
 ```
+
+[Homebrew](https://brew.sh), macOS 13 이상, Apple Silicon이 필요합니다. 업데이트는 `brew update` 후 `brew upgrade --cask yurseria/tap/containbar`로 진행합니다.
+
+앱은 Developer ID 서명·공증이 되어 있지 않습니다. macOS가 차단한다면 신뢰하는 앱에 한해 **시스템 설정 → 개인정보 보호 및 보안 → 확인 없이 열기**로 허용하세요. Homebrew가 Gatekeeper를 우회하지는 않습니다. v0.6.0은 아직 **Docker Tray.app**으로 설치되며, 새 이름의 릴리스부터 **Containbar.app**으로 전환됩니다.
+
+기존 수동 설치 앱 관련 안내는 [Homebrew Tap](https://github.com/yurseria/homebrew-tap/blob/main/README_KO.md), 유지보수용 자동화 설명은 [릴리스 연동 문서](.github/HOMEBREW.md)를 참고하세요.
 
 ## Docker 런타임
 
@@ -132,8 +138,7 @@ npm run tauri build
 │   ├── runtime/            # 번들된 바이너리 (git 제외)
 │   └── tauri.conf.json     # Tauri 설정
 ├── scripts/
-│   ├── bundle-runtime.sh   # Colima/Lima/Docker CLI 번들링
-│   └── install.sh          # 원클릭 설치 스크립트
+│   └── bundle-runtime.sh   # Colima/Lima/Docker CLI 번들링
 └── vite.config.ts
 ```
 
