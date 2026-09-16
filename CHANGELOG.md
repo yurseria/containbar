@@ -1,3 +1,15 @@
+# v0.6.1 (Wed Sep 16 2026)
+
+#### 🐛 Bug Fix
+
+- fix: restore tray clicks on macOS 27 ([@yurseria](https://github.com/yurseria))
+
+#### Authors: 1
+
+- minsu ([@yurseria](https://github.com/yurseria))
+
+---
+
 # v0.6.0 (Mon Sep 07 2026)
 
 #### 🚀 Enhancement
