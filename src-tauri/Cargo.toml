@@ -42,3 +42,9 @@ objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
 
 [profile.dev]
 debug = 0
+
+# macOS 27 no longer forwards clicks to an NSStatusItem while a menu is
+# permanently attached. Keep the upstream patch vendored until it is
+# released on crates.io: https://github.com/tauri-apps/tray-icon/pull/365
+[patch.crates-io]
+tray-icon = { path = "vendor/tray-icon" }
