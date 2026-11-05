@@ -85,11 +85,35 @@ pub struct ContainerGroup {
 
 /// Create a Docker CLI command pinned to the provider selected in the app.
 fn docker_cmd(provider: crate::provider::ProviderKind) -> Command {
-    let mut cmd = Command::new(crate::runtime::docker_cli_for(provider));
+    let cli = crate::runtime::docker_cli_for(provider);
+    let mut cmd = Command::new(&cli);
+    configure_docker_path(&mut cmd, &cli);
     if let Some(host) = crate::runtime::docker_host_for(provider) {
         cmd.env("DOCKER_HOST", host);
     }
     cmd
+}
+
+// Finder-launched apps often inherit a minimal PATH. Docker invokes credential
+// helpers by name, including helpers installed alongside the bundled CLI.
+fn configure_docker_path(cmd: &mut Command, cli: &Path) {
+    let mut paths: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    if let Some(parent) = cli.parent().filter(|path| !path.as_os_str().is_empty()) {
+        paths.push(parent.to_path_buf());
+    }
+    paths.extend(
+        [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/Applications/Docker.app/Contents/Resources/bin",
+        ]
+        .map(PathBuf::from),
+    );
+    if let Ok(path) = std::env::join_paths(paths) {
+        cmd.env("PATH", path);
+    }
 }
 
 /// Build a CLI command for an exec-style operation, choosing `docker` or
@@ -2097,6 +2121,11 @@ fn compose_failure_message(status: std::process::ExitStatus, stderr: &str, stdou
         .collect::<Vec<_>>()
         .join("\n");
     let normalized = details.to_ascii_lowercase();
+    if normalized.contains("docker-credential-osxkeychain")
+        && normalized.contains("executable file not found")
+    {
+        return "Docker's macOS Keychain credential helper was not found. Install it with `brew install docker-credential-helper`, then restart Containbar and try again. Your Docker credential settings have not been changed.".to_string();
+    }
     if normalized.contains("address already in use") || normalized.contains("errno: 48") {
         return "A host port required by this Compose project is already in use. Stop the conflicting runtime or process, or change the host port in the Compose file, then try again."
             .to_string();
@@ -2304,6 +2333,10 @@ pub async fn compose_up(
             .spawn()
             .or_else(|_| {
                 let mut fallback = Command::new("docker-compose");
+                configure_docker_path(
+                    &mut fallback,
+                    &crate::runtime::docker_cli_for(selected_provider),
+                );
                 if let Some(host) = crate::runtime::docker_host_for(selected_provider) {
                     fallback.env("DOCKER_HOST", host);
                 }

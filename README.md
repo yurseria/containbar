@@ -89,6 +89,7 @@ Docker Tray는 Docker Desktop 없이도 동작합니다.
 - [Rust](https://rustup.rs/)
 - [Node.js 22+](https://nodejs.org/)
 - [Colima](https://github.com/abiosoft/colima) (`brew install colima` — 런타임 번들링용)
+- Docker 인증 헬퍼 (`brew install docker-credential-helper` — 런타임 번들링용)
 
 ## 개발
 

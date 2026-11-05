@@ -92,7 +92,7 @@ jobs:
           ARG_0: ${{ needs.release.outputs.tag }}
 
       - name: Install Colima & Docker CLI (for runtime bundling)
-        run: brew install colima docker
+        run: brew install colima docker docker-credential-helper
 
       - name: Bundle runtime
         run: ./scripts/bundle-runtime.sh
