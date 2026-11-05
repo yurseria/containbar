@@ -1,3 +1,15 @@
+# v0.6.2 (Thu Nov 05 2026)
+
+#### 🐛 Bug Fix
+
+- fix: resolve Docker credential helper for compose ([@yurseria](https://github.com/yurseria))
+
+#### Authors: 1
+
+- minsu ([@yurseria](https://github.com/yurseria))
+
+---
+
 # v0.6.1 (Wed Sep 16 2026)
 
 #### 🐛 Bug Fix
