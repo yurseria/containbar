@@ -103,6 +103,7 @@ Development:
 - [Rust](https://rustup.rs/)
 - [Node.js 22+](https://nodejs.org/)
 - [Colima](https://github.com/abiosoft/colima) (`brew install colima` — for runtime bundling)
+- Docker credential helper (`brew install docker-credential-helper` — for runtime bundling)
 
 ## Development
 

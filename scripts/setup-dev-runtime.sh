@@ -11,6 +11,7 @@ success() { printf '\033[1;32m%s\033[0m\n' "$*"; }
 
 had_colima=false
 had_docker=false
+had_credential_helper=false
 
 cleanup() {
     info "Cleaning up runtime binaries..."
@@ -24,6 +25,10 @@ cleanup() {
         info "Removing docker CLI..."
         brew uninstall docker
     fi
+    if ! $had_credential_helper; then
+        info "Removing Docker credential helper..."
+        brew uninstall docker-credential-helper
+    fi
 }
 trap cleanup EXIT
 
@@ -35,6 +40,11 @@ fi
 if brew list docker &>/dev/null; then had_docker=true; else
     info "Installing docker CLI..."
     brew install docker
+fi
+
+if brew list docker-credential-helper &>/dev/null; then had_credential_helper=true; else
+    info "Installing Docker credential helper..."
+    brew install docker-credential-helper
 fi
 
 info "Bundling runtime..."
